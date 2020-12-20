@@ -1,0 +1,120 @@
+apiVersion: v1
+kind: Template
+metadata:
+  annotations:
+    description: "Git Trigger template for applications built using a Tekton Pipeline.  Note: Your namespace must be labeled with tekton-java-cloud-native: \"\""
+    iconClass: icon-git
+    openshift.io/display-name: "Git Trigger for DEV"
+    template.openshift.io/bindable: "false"
+    tags: "git,tekton"
+    version: "1.0"
+  name: tekton-git-trigger
+objects:
+  - apiVersion: triggers.tekton.dev/v1alpha1
+    kind: TriggerTemplate
+    metadata:
+      name: ${APP_NAME}-triggertemplate
+    spec:
+      params:
+        - name: git-branch
+          description: The git branch
+          default: master
+        - name: git-repo-url
+          description: The git repository url
+        - name: config-git-repo-url
+          description: "Git repository for application configuration"
+        - name: config-git-branch
+          description: "Git repository branch for application configuration"
+        - name: config-git-path
+          description: "Git repository path for application configuration"
+        - name: appName
+          description: "The application name"
+      resourcetemplates:
+        - apiVersion: tekton.dev/v1beta1
+          kind: PipelineRun
+          metadata:
+            name: ${APP_NAME}-pipeline-run-$(uid)
+          spec:
+            serviceAccountName: pipeline
+            pipelineRef: 
+              name: build-and-deploy-java-cloud-native
+            params:
+            - name: appName
+              value: $(tt.params.appName)
+            - name: build-type
+              value: quarkus-fast-jar
+            - name: git-repo
+              value: $(tt.params.git-repo-url)
+            - name: git-branch
+              value: $(tt.params.git-branch)
+            - name: config-git-repo
+              value: $(tt.params.config-git-repo-url)
+            - name: config-git-branch
+              value: $(tt.params.config-git-branch)
+            - name: config-git-path
+              value: $(tt.params.config-git-path)
+
+  - apiVersion: triggers.tekton.dev/v1alpha1
+    kind: TriggerBinding
+    metadata:
+      name: ${APP_NAME}-pipelinebinding
+    spec:
+      params:
+        - name: git-branch
+          value: $(body.head_commit.id)
+        - name: appName
+          value: ${APP_NAME}
+        - name: git-repo-url
+          value: "$(body.ssh_url)"
+        - name: config-git-repo-url
+          value: ${CONFIG_GIT_REPOSITORY}
+        - name: config-git-branch
+          value: ${CONFIG_GIT_BRANCH}
+        - name: config-git-path
+          value: ${CONFIG_GIT_PATH}
+
+  - apiVersion: triggers.tekton.dev/v1alpha1
+    kind: EventListener
+    metadata:
+      name: ${APP_NAME}-listener
+    spec:
+      serviceAccountName: pipeline
+      triggers:
+        - bindings:
+          - ref: ${APP_NAME}-pipelinebinding
+          template:
+            name: ${APP_NAME}-triggertemplate
+parameters:
+  -
+    description: "Name of the deployable application."
+    displayName: "Application Name"
+    name: APP_NAME
+    required: true
+  -
+    description: "Git repository for source code."
+    displayName: "Git Repo"
+    name: GIT_REPOSITORY
+    required: true
+  -
+    description: "Git repository branch to build app from"
+    displayName: "Git Branch"
+    name: GIT_BRANCH
+    required: true
+    value: master
+  -
+    description: "Git repository for application configuration"
+    displayName: "App Config Git Repo"
+    name: CONFIG_GIT_REPOSITORY
+    required: true
+  -
+    description: "Git repository branch for application configuration"
+    displayName: "App Config Git Branch"
+    name: CONFIG_GIT_BRANCH
+    required: true
+    value: master
+  -
+    description: "Path to the application OCP config files"
+    displayName: "App Config Path"
+    name: CONFIG_GIT_PATH
+    required: true
+    value: "/"

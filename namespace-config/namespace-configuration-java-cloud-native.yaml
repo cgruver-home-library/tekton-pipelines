@@ -1,0 +1,318 @@
+apiVersion: redhatcop.redhat.io/v1alpha1
+kind: NamespaceConfig
+metadata:
+  name: tekton-pipeline-java-cloud-native
+spec:
+  labelSelector:
+    matchLabels:
+      tekton-java-cloud-native: ""
+  templates:
+  - objectTemplate: |
+      apiVersion: v1
+      kind: ServiceAccount
+      metadata:
+        name: pipeline
+        namespace: {{ .Name }}
+  - objectTemplate: |
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: RoleBinding
+      metadata:
+        name: edit
+        namespace: {{ .Name }}
+      roleRef:
+        apiGroup: rbac.authorization.k8s.io
+        kind: ClusterRole
+        name: edit
+      subjects:
+      - kind: ServiceAccount
+        name: pipeline
+        namespace: {{ .Name }}
+  - objectTemplate: |
+      apiVersion: tekton.dev/v1beta1
+      kind: Pipeline
+      metadata:
+        name: build-and-deploy-java-cloud-native
+        namespace: {{ .Name }}
+      spec:
+        params:
+        - name: appName
+          type: string
+          description: "Application Name"
+        - name: build-type
+          type: string
+          description: "Selected build type: quarkus-jvm, quarkus-fast-jar, quarkus-native, spring-boot"
+        - name: git-repo
+          type: string
+          description: "Git Repository URL"
+        - name: git-branch
+          type: string
+          description: "Git Branch to clone"
+          default: "master"
+        - name: config-git-repo
+          type: string
+          description: "Config Git Repository URL"
+        - name: config-git-branch
+          type: string
+          description: "Config Git Branch to clone"
+          default: "master"
+        - name: config-git-path
+          type: string
+          description: "Config Git Path"
+          default: "/"
+        tasks:
+        - name: build
+          taskRef:
+            name: build-java-cloud-native
+          params:
+          - name: appName
+            value: $(params.appName)
+          - name: build-type
+            value: $(params.build-type)
+          - name: git-repo
+            value: $(params.git-repo)
+          - name: git-branch
+            value: $(params.git-branch)
+        - name: config
+          taskRef:
+            name: config-app
+          runAfter:
+          - build
+          params:
+          - name: appName
+            value: $(params.appName)
+          - name: config-git-repo
+            value: $(params.config-git-repo)
+          - name: config-git-branch
+            value: $(params.config-git-branch)
+          - name: config-git-path
+            value: $(params.config-git-path)
+        - name: deploy
+          taskRef:
+            name: deploy-app
+          runAfter:
+          - config
+          params:
+          - name: appName
+            value: $(params.appName)
+  - objectTemplate: |
+      apiVersion: tekton.dev/v1beta1
+      kind: Task
+      metadata:
+        name: build-java-cloud-native
+        namespace: {{ .Name }}
+      spec:
+        stepTemplate:
+          securityContext:
+            capabilities:
+              drop:
+              - KILL
+            runAsUser: 1000640000
+          volumeMounts:
+          - name: varlibc
+            mountPath: /var/lib/containers
+          - name: maven-settings
+            mountPath: /tmp/maven-settings
+        params:
+        - name: appName
+          type: string
+          description: "Application Name"
+        - name: build-type
+          type: string
+          description: "Selected build type: quarkus-jvm, quarkus-fast-jar, quarkus-native, spring-boot"
+        - name: git-repo
+          type: string
+          description: "Git Repository SSH URL"
+        - name: git-branch
+          type: string
+          description: "Git Branch to clone"
+          default: "master"
+        - name: tlsVerify
+          description: tls verify
+          type: string
+          default: "false"
+        steps:
+        - name: prep-build
+          image: image-registry.openshift-image-registry.svc:5000/openshift/maven-jdk-mandrel-builder:latest
+          imagePullPolicy: Always
+          script: |
+            git clone -b $(params.git-branch) --single-branch $(params.git-repo) /workspace/source
+            cp /tmp/maven-settings/settings.xml /workspace/source
+            cd /workspace/source
+            echo "$(git rev-parse HEAD)" > git-commit.out
+          env:
+          - name: user.home
+            value: /tekton/home
+          workingDir: "/"
+        - name: build-sources
+          image: image-registry.openshift-image-registry.svc:5000/openshift/maven-jdk-mandrel-builder:latest
+          imagePullPolicy: Always
+          script: |
+            MVN_ARGS="-DskipTests -Dmaven.wagon.http.ssl.insecure=true -ssettings.xml -DappName=app"
+            case $(params.build-type) in
+              spring-boot)
+              ;;
+              quarkus-jvm)
+              ;;
+              quarkus-fast-jar)
+              MVN_ARGS="${MVN_ARGS} -Dquarkus.package.type=fast-jar"
+              ;;
+              quarkus-native)
+              MVN_ARGS="${MVN_ARGS} -Pnative"
+              ;;
+            esac
+            mvn ${MVN_ARGS} clean package
+          env:
+          - name: user.home
+            value: /tekton/home
+          workingDir: "/workspace/source"
+        - name: build-image
+          image: image-registry.openshift-image-registry.svc:5000/openshift/buildah:nonroot
+          imagePullPolicy: Always
+          script: |
+            echo "tekton:x:$(id -u):0:tekton user:${HOME}:/sbin/nologin" >> /etc/passwd
+            echo $(id -u):1100000000:65536 >> /etc/subuid
+            echo $(id -u):1100000000:65536 >> /etc/subgid
+            export BUILDAH_ISOLATION=chroot
+            mkdir -p ${HOME}/.config/containers
+            echo "[storage]" > ${HOME}/.config/containers/storage.conf
+            echo "driver=\"vfs\"" >> ${HOME}/.config/containers/storage.conf
+            DESTINATION_IMAGE="image-registry.openshift-image-registry.svc:5000/$(context.taskRun.namespace)/$(params.appName):latest"
+            if [[ $(params.build-type) == "quarkus-native" ]]
+            then
+              CONTAINER=$(buildah --tls-verify=$(params.tlsVerify) from image-registry.openshift-image-registry.svc:5000/openshift/ubi-minimal:latest)
+            else
+              CONTAINER=$(buildah --tls-verify=$(params.tlsVerify) from image-registry.openshift-image-registry.svc:5000/openshift/jdk-11-app-runner:latest )
+            fi
+            case $(params.build-type) in
+              spring-boot)
+              buildah copy ${CONTAINER} ./target/app.jar /deployments/app.jar
+              ;;
+              quarkus-jvm)
+              buildah copy ${CONTAINER} ./target/lib/* /deployments/lib/
+              buildah copy ${CONTAINER} ./target/app-runner.jar /deployments/app.jar
+              ;;
+              quarkus-fast-jar)
+              buildah copy ${CONTAINER} ./target/quarkus-app/lib/ /deployments/lib/
+              buildah copy ${CONTAINER} ./target/quarkus-app/quarkus-run.jar /deployments/app.jar
+              buildah copy ${CONTAINER} ./target/quarkus-app/app/ /deployments/app/
+              buildah copy ${CONTAINER} ./target/quarkus-app/quarkus/ /deployments/quarkus/
+              ;;
+              quarkus-native)
+              buildah copy ${CONTAINER} ./target/app-runner /application
+              buildah config --entrypoint '["/application", "-Dquarkus.http.host=0.0.0.0", "${JAVA_OPTIONS}"]' --port 8080 ${CONTAINER}
+            esac
+            buildah config --label GIT_COMMIT=$(cat git-commit.out) --author="Tekton" ${CONTAINER}
+            buildah commit ${CONTAINER} ${DESTINATION_IMAGE}
+            buildah unmount ${CONTAINER}
+          env:
+          - name: user.home
+            value: /tekton/home
+          workingDir: "/workspace/source"
+        - name: push-image
+          image: image-registry.openshift-image-registry.svc:5000/openshift/buildah:nonroot
+          imagePullPolicy: Always
+          script: |
+            echo "tekton:x:$(id -u):0:tekton user:${HOME}:/sbin/nologin" >> /etc/passwd
+            DESTINATION_IMAGE="image-registry.openshift-image-registry.svc:5000/$(context.taskRun.namespace)/$(params.appName):latest"
+            buildah push --tls-verify=$(params.tlsVerify) ${DESTINATION_IMAGE} docker://${DESTINATION_IMAGE}
+          workingDir: "/workspace/source"
+        volumes:
+        - name: varlibc
+          emptyDir: {}
+        - name: maven-settings
+          configMap:
+            name: maven-settings-xml
+  - objectTemplate: |
+      apiVersion: tekton.dev/v1beta1
+      kind: Task
+      metadata:
+        name: config-app
+        namespace: {{ .Name }}
+      spec:
+        params:
+        - name: config-git-repo
+          type: string
+          description: "Git Repository URL"
+        - name: config-git-branch
+          type: string
+          description: "Git Branch to clone"
+          default: "master"
+        - name: config-git-path
+          type: string
+          description: "Config Path"
+          default: "/"
+        - name: appName
+          description: the application name
+        steps:
+        - name: prep-build
+          image: image-registry.openshift-image-registry.svc:5000/openshift/maven-jdk-mandrel-builder:latest
+          imagePullPolicy: IfNotPresent
+          script: |
+            git clone -b $(params.config-git-branch) --single-branch $(params.config-git-repo) /workspace/source
+          env:
+          - name: user.home
+            value: /tekton/home
+          workingDir: "/"
+        - name: apply
+          image: image-registry.openshift-image-registry.svc:5000/openshift/origin-cli:latest
+          imagePullPolicy: IfNotPresent
+          workingDir: /workspace/source
+          script: |
+            echo "Applying artifacts in $(params.config-git-path)/apply directory"
+            for i in $(ls ./$(params.config-git-path)/apply)
+            do
+              sed -i "s|--APP_NAME--|$(params.appName)|g" ./$(params.config-git-path)/apply/${i}
+            done
+            oc apply -f ./$(params.config-git-path)/apply
+            if [ -f ./$(params.config-git-path)/patch/deployment-patch.yaml ]
+            then
+              echo "Patching deployment"
+              sed -i "s|--APP_NAME--|$(params.appName)|g" ./$(params.config-git-path)/patch/deployment-patch.yaml
+              oc patch deployment $(params.appName) --patch "$(cat ./$(params.config-git-path)/patch/deployment-patch.yaml)"
+            fi
+            echo -----------------------------------
+  - objectTemplate: |
+      apiVersion: tekton.dev/v1beta1
+      kind: Task
+      metadata:
+        name: deploy-app
+        namespace: {{ .Name }}
+      spec:
+        params:
+        - name: appName
+          description: the application name
+        steps:
+        - name: rollout
+          image: image-registry.openshift-image-registry.svc:5000/openshift/origin-cli:latest
+          imagePullPolicy: IfNotPresent
+          workingDir: /workspace
+          command: ["/bin/bash", "-c"]
+          args:
+          - |-
+              echo Rolling out $(params.appName)
+              DESTINATION_IMAGE="image-registry.openshift-image-registry.svc:5000/$(context.taskRun.namespace)/$(params.appName):latest"
+              oc set image deployment/$(params.appName) $(params.appName)=${DESTINATION_IMAGE}
+              oc rollout restart deployment/$(params.appName)
+              echo -----------------------------------
+  - objectTemplate: |
+      apiVersion: tekton.dev/v1beta1
+      kind: Task
+      metadata:
+        name: initialize-deployment
+        namespace: {{ .Name }}
+      spec:
+        params:
+          - name: appName
+            description: the application name
+        steps:
+          - name: initialize
+            image: image-registry.openshift-image-registry.svc:5000/openshift/origin-cli:latest
+            imagePullPolicy: Always
+            workingDir: /workspace
+            command: ["/bin/bash", "-c"]
+            args:
+              - |-
+                echo Configuring Deployment $(params.appName)
+                DESTINATION_IMAGE="image-registry.openshift-image-registry.svc:5000/$(context.taskRun.namespace)/$(params.appName):latest"
+                oc set image deployment/$(params.appName) $(params.appName)=${DESTINATION_IMAGE}
+                echo -----------------------------------

@@ -1,0 +1,71 @@
+apiVersion: v1
+kind: Template
+metadata:
+  annotations:
+    description: "Maven Mirror Configuration for Tekton Java Builds"
+    iconClass: icon-java
+    openshift.io/display-name: "Maven Mirror Configuration for Tekton Java Builds (Spring Boot & Quarkus)"
+    template.openshift.io/bindable: "false"
+    tags: "tekton"
+    version: "1.0"
+  name: maven-mirror-config
+objects:
+  - apiVersion: redhatcop.redhat.io/v1alpha1
+    kind: NamespaceConfig
+    metadata:
+      name: maven-mirror-config
+    spec:
+      labelSelector:
+        matchLabels:
+          maven-mirror-config: ""
+      templates:
+      - objectTemplate: |
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: maven-settings-xml
+            namespace: {{ .Name }}
+          data:
+            settings.xml: |
+              <?xml version="1.0" encoding="UTF-8"?>
+              <settings>
+                  <mirrors>
+                      <mirror>
+                          <id>${MVN_MIRROR_ID}</id>
+                          <name>${MVN_MIRROR_NAME}</name>
+                          <url>${MVN_MIRROR_URL}</url>
+                          <mirrorOf>*</mirrorOf>
+                      </mirror>
+                  </mirrors>
+                  <profiles>
+                      <profile>
+                          <id>maven-nexus-repo</id>
+                          <repositories>
+                              <repository>
+                                  <id>${MVN_MIRROR_ID}</id>
+                                  <name>${MVN_MIRROR_NAME}</name>
+                                  <url>${MVN_MIRROR_URL}</url>
+                              </repository>
+                          </repositories>
+                      </profile>
+                  </profiles>
+                  <activeProfiles>
+                      <activeProfile>maven-nexus-repo</activeProfile>
+                  </activeProfiles>
+              </settings>
+parameters:
+- description: "ID for your Maven Nexus mirror"
+  displayName: "Maven Mirror ID"
+  name: MVN_MIRROR_ID
+  required: true
+  value: "homelab-central"
+- description: "Maven Mirror Name"
+  displayName: "Maven Mirror Name"
+  name: MVN_MIRROR_NAME
+  required: true
+  value: "homelab-central"
+- description: "Maven Mirror URL"
+  displayName: "Maven Mirror URL"
+  name: MVN_MIRROR_URL
+  required: true
+  value: "https://nexus.your.domain.com:8443/repository/homelab-central/"
