@@ -2,7 +2,7 @@ FROM registry.access.redhat.com/ubi8/ubi-minimal:8.3
 ARG MAVEN_VERSION=3.6.3
 ARG BASE_URL=https://apache.osuosl.org/maven/maven-3/${MAVEN_VERSION}/binaries
 ARG JAVA_PACKAGE=java-11-openjdk-headless
-ARG MANDREL_VERSION=20.2.0.0.Final
+ARG MANDREL_VERSION=20.3.0.0.Final
 ARG USER_HOME_DIR="/maven"
 ARG WORK_DIR="/workspace"
 ARG GRAALVM_DIR=/opt/mandral
@@ -25,7 +25,7 @@ RUN microdnf install glibc-devel zlib-devel gcc libffi-devel libstdc++-devel gcc
     && rm -f /tmp/apache-maven.tar.gz \
     && ln -s /usr/share/maven/bin/mvn /usr/bin/mvn \
     && mkdir -p ${GRAALVM_DIR} \
-    && curl -fsSL -o /tmp/mandrel-java11-linux-amd64-${MANDREL_VERSION}.tar.gz https://github.com/graalvm/mandrel/releases/download/mandrel-20.2.0.0.Final/mandrel-java11-linux-amd64-${MANDREL_VERSION}.tar.gz \
+    && curl -fsSL -o /tmp/mandrel-java11-linux-amd64-${MANDREL_VERSION}.tar.gz https://github.com/graalvm/mandrel/releases/download/mandrel-${MANDREL_VERSION}/mandrel-java11-linux-amd64-${MANDREL_VERSION}.tar.gz \
     && tar xzf /tmp/mandrel-java11-linux-amd64-${MANDREL_VERSION}.tar.gz -C ${GRAALVM_DIR} --strip-components=1
 ENV MAVEN_HOME=/usr/share/maven
 ENV MAVEN_CONFIG="${USER_HOME_DIR}/.m2"

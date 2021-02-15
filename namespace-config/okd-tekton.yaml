@@ -1,0 +1,29 @@
+apiVersion: redhatcop.redhat.io/v1alpha1
+kind: NamespaceConfig
+metadata:
+  name: tekton-pipeline-okd-config
+spec:
+  labelSelector:
+    matchLabels:
+      okd-tekton: ""
+  templates:
+  - objectTemplate: |
+      apiVersion: v1
+      kind: ServiceAccount
+      metadata:
+        name: pipeline
+        namespace: {{ .Name }}
+  - objectTemplate: |
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: RoleBinding
+      metadata:
+        name: edit
+        namespace: {{ .Name }}
+      roleRef:
+        apiGroup: rbac.authorization.k8s.io
+        kind: ClusterRole
+        name: edit
+      subjects:
+      - kind: ServiceAccount
+        name: pipeline
+        namespace: {{ .Name }}
