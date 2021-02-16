@@ -5,6 +5,25 @@ This lab exercise provides an opinionated set of pipelines that allow developmen
 
 The capabilities provided are achieved by taking advantage of OpenShift Templates exposed through the Catalog, and the Namespace Configuration Operator which synchronizes and maintains common artifacts across labeled namespaces.
 
+When you are finished with this lab, you will have a developer experience that flows like this:
+
+1. From the Delveloper Catalog, select the appropriate Template, and provide the Git URL and Branch that you will be working from.
+
+1. The template will trigger a Tekton TaskRun which will:
+
+   1. Create an `ImageStream`, `Deployment`, and `Service` for your application
+
+   1. Create a Tekton `TriggerTemplate`, `TriggerBinding`, and `EventListener` which will execute a `PipelineRun` when triggered by a GitLab webhook
+
+   1. Create a GitLab Webhook that responds to `push` events by hitting the EventListener Route
+
+1. A simple `git push` to the selected branch of your GitLab repository will trigger a full build, test, deploy pipeline.
+
+Developer Joy!
+
+
+
+
 
 This lab exercise will require the following components: View each link for instructions
 
