@@ -30,7 +30,7 @@ spec:
   steps:
   - name: prep-build
     image: image-registry.openshift-image-registry.svc:5000/openshift/maven-jdk-mandrel-builder:latest
-    imagePullPolicy: Always
+    imagePullPolicy: IfNotPresent
     script: |
       mkdir -p /workspace/source
       cd /workspace/source
@@ -44,7 +44,7 @@ spec:
     workingDir: "/"
   - name: build-sources
     image: image-registry.openshift-image-registry.svc:5000/openshift/maven-jdk-mandrel-builder:latest
-    imagePullPolicy: Always
+    imagePullPolicy: IfNotPresent
     script: |
       MVN_ARGS="-DskipTests -Dmaven.wagon.http.ssl.insecure=true -ssettings.xml -DappName=app"
       case $(params.build-type) in
@@ -66,7 +66,7 @@ spec:
     workingDir: "/workspace/source"
   - name: build-image
     image: image-registry.openshift-image-registry.svc:5000/openshift/buildah:nonroot
-    imagePullPolicy: Always
+    imagePullPolicy: IfNotPresent
     script: |
       echo "tekton:x:$(id -u):0:tekton user:${HOME}:/sbin/nologin" >> /etc/passwd
       echo $(id -u):1100000000:65536 >> /etc/subuid
@@ -101,6 +101,7 @@ spec:
         buildah config --entrypoint '["/application", "-Dquarkus.http.host=0.0.0.0", "${JAVA_OPTIONS}"]' --port 8080 ${CONTAINER}
       esac
       buildah config --label GIT_COMMIT=$(params.git-checkout-sha) --author="Tekton" ${CONTAINER}
+      buildah config --label GIT_URL=$(params.git-repo-url) --author="Tekton" ${CONTAINER}
       buildah commit ${CONTAINER} ${DESTINATION_IMAGE}
       buildah unmount ${CONTAINER}
     env:
@@ -109,7 +110,7 @@ spec:
     workingDir: "/workspace/source"
   - name: push-image
     image: image-registry.openshift-image-registry.svc:5000/openshift/buildah:nonroot
-    imagePullPolicy: Always
+    imagePullPolicy: IfNotPresent
     script: |
       echo "tekton:x:$(id -u):0:tekton user:${HOME}:/sbin/nologin" >> /etc/passwd
       DESTINATION_IMAGE="image-registry.openshift-image-registry.svc:5000/$(context.taskRun.namespace)/$(params.app-name):latest"
