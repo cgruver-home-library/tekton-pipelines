@@ -1,0 +1,123 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: build-java-cloud-native
+spec:
+  stepTemplate:
+    volumeMounts:
+    - name: varlibc
+      mountPath: /var/lib/containers
+    - name: maven-settings
+      mountPath: /tmp/maven-settings
+  params:
+  - name: app-name
+    type: string
+    description: "Application Name"
+  - name: build-type
+    type: string
+    description: "Selected build type: quarkus-jvm, quarkus-fast-jar, quarkus-native, spring-boot"
+  - name: git-repo-url
+    type: string
+    description: "Git Repository URL"
+  - name: git-checkout-sha
+    type: string
+    description: "Git SHA to checkout"
+    default: "main"
+  - name: tlsVerify
+    description: tls verify
+    type: string
+    default: "false"
+  steps:
+  - name: prep-build
+    image: image-registry.openshift-image-registry.svc:5000/openshift/maven-jdk-mandrel-builder:latest
+    imagePullPolicy: Always
+    script: |
+      mkdir -p /workspace/source
+      cd /workspace/source
+      git init
+      git remote add origin $(params.git-repo-url)
+      git pull origin $(params.git-checkout-sha)
+      cp /tmp/maven-settings/settings.xml /workspace/source
+    env:
+    - name: user.home
+      value: /tekton/home
+    workingDir: "/"
+  - name: build-sources
+    image: image-registry.openshift-image-registry.svc:5000/openshift/maven-jdk-mandrel-builder:latest
+    imagePullPolicy: Always
+    script: |
+      MVN_ARGS="-DskipTests -Dmaven.wagon.http.ssl.insecure=true -ssettings.xml -DappName=app"
+      case $(params.build-type) in
+        spring-boot)
+        ;;
+        quarkus-jvm)
+        ;;
+        quarkus-fast-jar)
+        MVN_ARGS="${MVN_ARGS} -Dquarkus.package.type=fast-jar"
+        ;;
+        quarkus-native)
+        MVN_ARGS="${MVN_ARGS} -Pnative"
+        ;;
+      esac
+      mvn ${MVN_ARGS} clean package
+    env:
+    - name: user.home
+      value: /tekton/home
+    workingDir: "/workspace/source"
+  - name: build-image
+    image: image-registry.openshift-image-registry.svc:5000/openshift/buildah:nonroot
+    imagePullPolicy: Always
+    script: |
+      echo "tekton:x:$(id -u):0:tekton user:${HOME}:/sbin/nologin" >> /etc/passwd
+      echo $(id -u):1100000000:65536 >> /etc/subuid
+      echo $(id -u):1100000000:65536 >> /etc/subgid
+      export BUILDAH_ISOLATION=chroot
+      mkdir -p ${HOME}/.config/containers
+      echo "[storage]" > ${HOME}/.config/containers/storage.conf
+      echo "driver=\"vfs\"" >> ${HOME}/.config/containers/storage.conf
+      DESTINATION_IMAGE="image-registry.openshift-image-registry.svc:5000/$(context.taskRun.namespace)/$(params.app-name):latest"
+      if [[ $(params.build-type) == "quarkus-native" ]]
+      then
+        CONTAINER=$(buildah --tls-verify=$(params.tlsVerify) from image-registry.openshift-image-registry.svc:5000/openshift/ubi-minimal:latest)
+      else
+        CONTAINER=$(buildah --tls-verify=$(params.tlsVerify) from image-registry.openshift-image-registry.svc:5000/openshift/jdk-11-app-runner:latest )
+      fi
+      case $(params.build-type) in
+        spring-boot)
+        buildah copy ${CONTAINER} ./target/app.jar /deployments/app.jar
+        ;;
+        quarkus-jvm)
+        buildah copy ${CONTAINER} ./target/lib/* /deployments/lib/
+        buildah copy ${CONTAINER} ./target/app-runner.jar /deployments/app.jar
+        ;;
+        quarkus-fast-jar)
+        buildah copy ${CONTAINER} ./target/quarkus-app/lib/ /deployments/lib/
+        buildah copy ${CONTAINER} ./target/quarkus-app/quarkus-run.jar /deployments/app.jar
+        buildah copy ${CONTAINER} ./target/quarkus-app/app/ /deployments/app/
+        buildah copy ${CONTAINER} ./target/quarkus-app/quarkus/ /deployments/quarkus/
+        ;;
+        quarkus-native)
+        buildah copy ${CONTAINER} ./target/app-runner /application
+        buildah config --entrypoint '["/application", "-Dquarkus.http.host=0.0.0.0", "${JAVA_OPTIONS}"]' --port 8080 ${CONTAINER}
+      esac
+      buildah config --label GIT_COMMIT=$(params.git-checkout-sha) --author="Tekton" ${CONTAINER}
+      buildah commit ${CONTAINER} ${DESTINATION_IMAGE}
+      buildah unmount ${CONTAINER}
+    env:
+    - name: user.home
+      value: /tekton/home
+    workingDir: "/workspace/source"
+  - name: push-image
+    image: image-registry.openshift-image-registry.svc:5000/openshift/buildah:nonroot
+    imagePullPolicy: Always
+    script: |
+      echo "tekton:x:$(id -u):0:tekton user:${HOME}:/sbin/nologin" >> /etc/passwd
+      DESTINATION_IMAGE="image-registry.openshift-image-registry.svc:5000/$(context.taskRun.namespace)/$(params.app-name):latest"
+      buildah push --tls-verify=$(params.tlsVerify) ${DESTINATION_IMAGE} docker://${DESTINATION_IMAGE}
+    workingDir: "/workspace/source"
+  volumes:
+  - name: varlibc
+    emptyDir: {}
+  - name: maven-settings
+    configMap:
+      name: maven-settings-xml
