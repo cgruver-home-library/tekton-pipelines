@@ -1,15 +1,15 @@
 apiVersion: tekton.dev/v1beta1
 kind: Pipeline
 metadata:
-  name: build-and-deploy-java
+  name: build-and-deploy-java-cloud-native
 spec:
   params:
+  - name: app-name
+    type: string
+    description: "Application Name"
   - name: build-type
     type: string
     description: "Selected build type: quarkus-jvm, quarkus-fast-jar, quarkus-native, spring-boot"
-  - name: deploy-type
-    type: string
-    description: "Selected deploy type: rolling-replace, blue-green, simple"
   - name: git-repo-url
     type: string
     description: "Git Repository URL"
@@ -17,34 +17,49 @@ spec:
     type: string
     description: "Git SHA to checkout"
     default: "main"
+  - name: config-git-repo-url
+    type: string
+    description: "Config Git Repository URL"
+  - name: config-git-branch
+    type: string
+    description: "Config Git Branch to clone"
+    default: "main"
   - name: config-git-path
     type: string
     description: "Config Git Path"
-    default: "/deploy-config"
+    default: "/"
   tasks:
   - name: build
     taskRef:
-      name: build-java
+      name: build-java-cloud-native
     params:
+    - name: app-name
+      value: $(params.app-name)
     - name: build-type
       value: $(params.build-type)
     - name: git-repo-url
       value: $(params.git-repo-url)
     - name: git-checkout-sha
       value: $(params.git-checkout-sha)
-  - name: deploy-rolling-replace
+  - name: config
+    taskRef:
+      name: config-app
+    runAfter:
+    - build
+    params:
+    - name: app-name
+      value: $(params.app-name)
+    - name: config-git-repo-url
+      value: $(params.config-git-repo-url)
+    - name: config-git-branch
+      value: $(params.config-git-branch)
+    - name: config-git-path
+      value: $(params.config-git-path)
+  - name: deploy
     taskRef:
       name: deploy-app
     runAfter:
-    - build
-    when:
-    - input: "$(params.deploy-type)"
-      operator: in
-      values: ["rolling-replace"]
+    - config
     params:
-    - name: git-repo-url
-      value: $(params.git-repo-url)
-    - name: git-checkout-sha
-      value: $(params.git-checkout-sha)
-    - name: config-git-path
-      value: $(params.config-git-path)
+    - name: app-name
+      value: $(params.app-name)

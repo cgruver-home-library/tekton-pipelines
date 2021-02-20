@@ -1,0 +1,59 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: create-webhook
+spec:
+  params:
+  - name: app-name
+    description: the application name
+  - name: git-repo-url
+    description: "The GitHub repo where the webhook will be created"
+  - name: git-branch
+    description: "The GitHub repo where the webhook will be created"
+  volumes:
+  - name: gitlab-secret
+    secret:
+      secretName: gitlab-secret
+  steps:
+  - name: create-route
+    image: image-registry.openshift-image-registry.svc:5000/openshift/origin-cli:latest
+    imagePullPolicy: IfNotPresent
+    volumeMounts:
+    - name: gitlab-secret
+      mountPath: /var/secret
+    env:
+    - name: user.home
+      value: /tekton/home
+    workingDir: "/workspace"
+    script: |
+      echo -----------------------------------
+      echo "Creating Route for Event Listener"
+      SVC_NAME=$(oc get el $(params.app-name)-listener -o=jsonpath='{.status.configuration.generatedName}')
+      oc expose service ${SVC_NAME}
+      echo $(oc get route ${SVC_NAME} -o=jsonpath='{.spec.host}') > /workspace/hook-url
+      echo -----------------------------------
+  - name: create-webhook
+    image: image-registry.openshift-image-registry.svc:5000/openshift/maven-jdk-mandrel-builder:latest
+    imagePullPolicy: IfNotPresent
+    volumeMounts:
+    - name: gitlab-secret
+      mountPath: /var/secret
+    env:
+    - name: user.home
+      value: /tekton/home
+    workingDir: "/workspace"
+    script: |
+      echo -----------------------------------
+      echo "Creating Webhook"
+      TEST=$(echo $(params.git-repo-url) | cut -d'@' -f1)
+      if [[ $TEST == "git" ]]
+      then
+        PROJECT_PATH=$(echo $(params.git-repo-url) | cut -d":" -f2 | cut -d"." -f1 | sed "s|/|%2F|g")
+        API_URL=http://$(echo $(params.git-repo-url) | cut -d"@" -f2 | cut -d":" -f1):8181/api/v4/projects/${PROJECT_PATH}/hooks
+      else
+        PROJECT_PATH=$(echo $(params.git-repo-url) | cut -d"/" -f4- | cut -d"." -f1 | sed "s|/|%2F|g")
+        API_URL=$(echo $(params.git-repo-url) | cut -d"/" -f-3)/api/v4/projects/${PROJECT_PATH}/hooks
+      fi
+      HOOK_URL=http://$(cat /workspace/hook-url)
+      curl -X POST -H "PRIVATE-TOKEN: $(cat /var/secret/access-token)" -d "push_events=true" -d "push_events_branch_filter=$(params.git-branch)" -d "token=$(cat /var/secret/hook-token)" -d "url=${HOOK_URL}" -d "enable_ssl_verification=false" ${API_URL}
+      echo -----------------------------------

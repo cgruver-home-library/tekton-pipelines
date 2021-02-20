@@ -1,15 +1,12 @@
 apiVersion: tekton.dev/v1beta1
 kind: Pipeline
 metadata:
-  name: build-and-deploy-java
+  name: build-and-deploy-java-cloud-native
 spec:
   params:
   - name: build-type
     type: string
     description: "Selected build type: quarkus-jvm, quarkus-fast-jar, quarkus-native, spring-boot"
-  - name: deploy-type
-    type: string
-    description: "Selected deploy type: rolling-replace, blue-green, simple"
   - name: git-repo-url
     type: string
     description: "Git Repository URL"
@@ -24,7 +21,7 @@ spec:
   tasks:
   - name: build
     taskRef:
-      name: build-java
+      name: build-java-cloud-native
     params:
     - name: build-type
       value: $(params.build-type)
@@ -32,16 +29,14 @@ spec:
       value: $(params.git-repo-url)
     - name: git-checkout-sha
       value: $(params.git-checkout-sha)
-  - name: deploy-rolling-replace
+  - name: deploy
     taskRef:
       name: deploy-app
     runAfter:
     - build
-    when:
-    - input: "$(params.deploy-type)"
-      operator: in
-      values: ["rolling-replace"]
     params:
+    - name: app-name
+      value: $(params.app-name)
     - name: git-repo-url
       value: $(params.git-repo-url)
     - name: git-checkout-sha

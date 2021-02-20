@@ -1,0 +1,64 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: deploy-app
+spec:
+  params:
+  - name: git-repo-url
+    type: string
+    description: "Git Repository URL"
+  - name: git-checkout-sha
+    description: the application name
+  volumes:
+  - name: app-deployment-template
+    configMap:
+      name: app-deployment-template
+  steps:
+  - name: prep-config
+    image: image-registry.openshift-image-registry.svc:5000/openshift/maven-jdk-mandrel-builder:latest
+    imagePullPolicy: IfNotPresent
+    script: |
+      mkdir -p /workspace/source
+      cd /workspace/source
+      git init
+      git remote add origin $(params.git-repo-url)
+      git pull origin $(params.git-checkout-sha)
+    env:
+    - name: user.home
+      value: /tekton/home
+    workingDir: "/"
+  - name: create-deployment
+    image: image-registry.openshift-image-registry.svc:5000/openshift/origin-cli:latest
+    imagePullPolicy: IfNotPresent
+    workingDir: /workspace/source
+    volumeMounts:
+    - name: app-deployment-template
+      mountPath: /workspace/templates
+    script: |
+      echo -----------------------------------
+      APP_NAME=$(basename $(params.git-repo-url) | cut -d'.' -f1)
+      SHA=$(params.git-checkout-sha)
+      DEPLOY_NAME="${APP_NAME}-${SHA:0:7}"
+      oc process --local -f /workspace/templates/app-deployment-template.yaml -p APP_NAME=${APP_NAME} -p DEPLOY_NAME=${DEPLOY_NAME} | oc apply -f -
+      echo -----------------------------------
+      echo "Applying artifacts in $(params.config-git-path)/apply directory"
+      for i in $(ls ./$(params.config-git-path)/apply)
+      do
+        sed -i "s|--APP_NAME--|${DEPLOY_NAME}|g" ./$(params.config-git-path)/apply/${i}
+      done
+      oc apply -f ./$(params.config-git-path)/apply
+      echo -----------------------------------
+      echo "Setting deployment image path"
+      echo -----------------------------------
+      DESTINATION_IMAGE="image-registry.openshift-image-registry.svc:5000/$(context.taskRun.namespace)/${APP_NAME}:${SHA:0:7}"
+      oc set image deployment/${DEPLOY_NAME} ${DEPLOY_NAME}=${DESTINATION_IMAGE}
+      if [ -f ./$(params.config-git-path)/patch/deployment-patch.yaml ]
+      then
+        echo -----------------------------------
+        echo "Patching deployment"
+        echo -----------------------------------
+        sed -i "s|--APP_NAME--|${DEPLOY_NAME}|g" ./$(params.config-git-path)/patch/deployment-patch.yaml
+        oc patch deployment ${DEPLOY_NAME} --patch "$(cat ./$(params.config-git-path)/patch/deployment-patch.yaml)"
+      fi
+      echo -----------------------------------
+

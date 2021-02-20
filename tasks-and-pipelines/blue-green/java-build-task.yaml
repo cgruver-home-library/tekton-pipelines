@@ -1,7 +1,7 @@
 apiVersion: tekton.dev/v1beta1
 kind: Task
 metadata:
-  name: build-java
+  name: build-java-cloud-native
 spec:
   stepTemplate:
     volumeMounts:
@@ -10,6 +10,9 @@ spec:
     - name: maven-settings
       mountPath: /tmp/maven-settings
   params:
+  - name: app-name
+    type: string
+    description: "Application Name"
   - name: build-type
     type: string
     description: "Selected build type: quarkus-jvm, quarkus-fast-jar, quarkus-native, spring-boot"
@@ -72,9 +75,7 @@ spec:
       mkdir -p ${HOME}/.config/containers
       echo "[storage]" > ${HOME}/.config/containers/storage.conf
       echo "driver=\"vfs\"" >> ${HOME}/.config/containers/storage.conf
-      APP_NAME=$(basename $(params.git-repo-url) | cut -d'.' -f1)
-      SHA=$(params.git-checkout-sha)
-      DESTINATION_IMAGE="image-registry.openshift-image-registry.svc:5000/$(context.taskRun.namespace)/${APP_NAME}:${SHA:0:7}"
+      DESTINATION_IMAGE="image-registry.openshift-image-registry.svc:5000/$(context.taskRun.namespace)/$(params.app-name):latest"
       if [[ $(params.build-type) == "quarkus-native" ]]
       then
         CONTAINER=$(buildah --tls-verify=$(params.tlsVerify) from image-registry.openshift-image-registry.svc:5000/openshift/ubi-minimal:latest)
@@ -112,12 +113,8 @@ spec:
     imagePullPolicy: IfNotPresent
     script: |
       echo "tekton:x:$(id -u):0:tekton user:${HOME}:/sbin/nologin" >> /etc/passwd
-      SHA=$(params.git-checkout-sha)
-      APP_NAME=$(basename $(params.git-repo-url) | cut -d'.' -f1)
-      DESTINATION_IMAGE="image-registry.openshift-image-registry.svc:5000/$(context.taskRun.namespace)/${APP_NAME}"
-      buildah push --tls-verify=$(params.tlsVerify) ${DESTINATION_IMAGE}:${SHA:0:7} docker://${DESTINATION_IMAGE}:${SHA:0:7}
-      buildah push --tls-verify=$(params.tlsVerify) ${DESTINATION_IMAGE}:${SHA:0:7} docker://${DESTINATION_IMAGE}:latest
-      buildah tag 
+      DESTINATION_IMAGE="image-registry.openshift-image-registry.svc:5000/$(context.taskRun.namespace)/$(params.app-name):latest"
+      buildah push --tls-verify=$(params.tlsVerify) ${DESTINATION_IMAGE} docker://${DESTINATION_IMAGE}
     workingDir: "/workspace/source"
   volumes:
   - name: varlibc
