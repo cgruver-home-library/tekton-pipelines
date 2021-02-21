@@ -11,7 +11,7 @@ data:
         template.openshift.io/bindable: "false"
       name: create-service
     objects:
-          - apiVersion: v1
+      - apiVersion: v1
         kind: Service
         metadata:
           annotations:
@@ -40,16 +40,6 @@ data:
         template.openshift.io/bindable: "false"
       name: create-deployment
     objects:
-      - apiVersion: v1
-        kind: ImageStream
-        metadata:
-          labels:
-            app: "${APP_NAME}"
-            version: "${DEPLOY_NAME}"
-          name: "${DEPLOY_NAME}"
-        spec:
-          lookupPolicy:
-            local: false
       - apiVersion: apps/v1
         kind: Deployment
         metadata:

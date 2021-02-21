@@ -34,7 +34,7 @@ spec:
       value: $(params.git-checkout-sha)
   - name: deploy-rolling-replace
     taskRef:
-      name: deploy-app
+      name: deploy-rolling-replace
     runAfter:
     - build
     when:

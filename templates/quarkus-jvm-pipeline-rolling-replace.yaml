@@ -4,7 +4,7 @@ metadata:
   annotations:
     description: "Build and Deploy template for Quarkus applications built using a Tekton Pipeline."
     iconClass: icon-openjdk
-    openshift.io/display-name: "Quarkus JVM Build & Deploy Pipeline for DEV - GitLab"
+    openshift.io/display-name: "Quarkus Fast-Jar Build & Deploy Pipeline for DEV - GitLab"
     template.openshift.io/bindable: "false"
     tags: "java,quarkus"
     version: "1.0"
@@ -25,7 +25,7 @@ objects:
       - name: build-type
         value: quarkus-fast-jar
       - name: deploy-type
-        value: java-rolling-replace
+        value: rolling-replace
 
 parameters:
   -

@@ -17,8 +17,8 @@ spec:
     default: "quarkus-fast-jar"
   - name: deploy-type
     type: string
-    description: "Pipeline to run: java-rolling-replace, java-blue-green, java-simple"
-    default: "java-rolling-replace"
+    description: "Pipeline to run: rolling-replace, blue-green, simple"
+    default: "rolling-replace"
   volumes:
   - name: trigger-template
     configMap:

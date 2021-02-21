@@ -9,76 +9,9 @@ spec:
   templates:
   - objectTemplate: |
       apiVersion: tekton.dev/v1beta1
-      kind: Pipeline
-      metadata:
-        name: build-and-deploy-java-cloud-native
-        namespace: {{ .Name }}
-      spec:
-        params:
-        - name: app-name
-          type: string
-          description: "Application Name"
-        - name: build-type
-          type: string
-          description: "Selected build type: quarkus-jvm, quarkus-fast-jar, quarkus-native, spring-boot"
-        - name: git-repo-url
-          type: string
-          description: "Git Repository URL"
-        - name: git-checkout-sha
-          type: string
-          description: "Git SHA to checkout"
-          default: "main"
-        - name: config-git-repo-url
-          type: string
-          description: "Config Git Repository URL"
-        - name: config-git-branch
-          type: string
-          description: "Config Git Branch to clone"
-          default: "main"
-        - name: config-git-path
-          type: string
-          description: "Config Git Path"
-          default: "/"
-        tasks:
-        - name: build
-          taskRef:
-            name: build-java-cloud-native
-          params:
-          - name: app-name
-            value: $(params.app-name)
-          - name: build-type
-            value: $(params.build-type)
-          - name: git-repo-url
-            value: $(params.git-repo-url)
-          - name: git-checkout-sha
-            value: $(params.git-checkout-sha)
-        - name: config
-          taskRef:
-            name: config-app
-          runAfter:
-          - build
-          params:
-          - name: app-name
-            value: $(params.app-name)
-          - name: config-git-repo-url
-            value: $(params.config-git-repo-url)
-          - name: config-git-branch
-            value: $(params.config-git-branch)
-          - name: config-git-path
-            value: $(params.config-git-path)
-        - name: deploy
-          taskRef:
-            name: deploy-app
-          runAfter:
-          - config
-          params:
-          - name: app-name
-            value: $(params.app-name)
-  - objectTemplate: |
-      apiVersion: tekton.dev/v1beta1
       kind: Task
       metadata:
-        name: build-java-cloud-native
+        name: build-java
         namespace: {{ .Name }}
       spec:
         stepTemplate:
@@ -88,9 +21,6 @@ spec:
           - name: maven-settings
             mountPath: /tmp/maven-settings
         params:
-        - name: app-name
-          type: string
-          description: "Application Name"
         - name: build-type
           type: string
           description: "Selected build type: quarkus-jvm, quarkus-fast-jar, quarkus-native, spring-boot"
@@ -100,7 +30,6 @@ spec:
         - name: git-checkout-sha
           type: string
           description: "Git SHA to checkout"
-          default: "main"
         - name: tlsVerify
           description: tls verify
           type: string
@@ -153,7 +82,9 @@ spec:
             mkdir -p ${HOME}/.config/containers
             echo "[storage]" > ${HOME}/.config/containers/storage.conf
             echo "driver=\"vfs\"" >> ${HOME}/.config/containers/storage.conf
-            DESTINATION_IMAGE="image-registry.openshift-image-registry.svc:5000/$(context.taskRun.namespace)/$(params.app-name):latest"
+            APP_NAME=$(basename $(params.git-repo-url) | cut -d'.' -f1)
+            SHA=$(params.git-checkout-sha)
+            DESTINATION_IMAGE="image-registry.openshift-image-registry.svc:5000/$(context.taskRun.namespace)/${APP_NAME}:${SHA:0:7}"
             if [[ $(params.build-type) == "quarkus-native" ]]
             then
               CONTAINER=$(buildah --tls-verify=$(params.tlsVerify) from image-registry.openshift-image-registry.svc:5000/openshift/ubi-minimal:latest)
@@ -179,6 +110,7 @@ spec:
               buildah config --entrypoint '["/application", "-Dquarkus.http.host=0.0.0.0", "${JAVA_OPTIONS}"]' --port 8080 ${CONTAINER}
             esac
             buildah config --label GIT_COMMIT=$(params.git-checkout-sha) --author="Tekton" ${CONTAINER}
+            buildah config --label GIT_URL=$(params.git-repo-url) --author="Tekton" ${CONTAINER}
             buildah commit ${CONTAINER} ${DESTINATION_IMAGE}
             buildah unmount ${CONTAINER}
           env:
@@ -190,8 +122,11 @@ spec:
           imagePullPolicy: IfNotPresent
           script: |
             echo "tekton:x:$(id -u):0:tekton user:${HOME}:/sbin/nologin" >> /etc/passwd
-            DESTINATION_IMAGE="image-registry.openshift-image-registry.svc:5000/$(context.taskRun.namespace)/$(params.app-name):latest"
-            buildah push --tls-verify=$(params.tlsVerify) ${DESTINATION_IMAGE} docker://${DESTINATION_IMAGE}
+            SHA=$(params.git-checkout-sha)
+            APP_NAME=$(basename $(params.git-repo-url) | cut -d'.' -f1)
+            DESTINATION_IMAGE="image-registry.openshift-image-registry.svc:5000/$(context.taskRun.namespace)/${APP_NAME}"
+            buildah push --tls-verify=$(params.tlsVerify) ${DESTINATION_IMAGE}:${SHA:0:7} docker://${DESTINATION_IMAGE}:${SHA:0:7}
+            buildah push --tls-verify=$(params.tlsVerify) ${DESTINATION_IMAGE}:${SHA:0:7} docker://${DESTINATION_IMAGE}:latest
           workingDir: "/workspace/source"
         volumes:
         - name: varlibc
@@ -199,145 +134,220 @@ spec:
         - name: maven-settings
           configMap:
             name: maven-settings-xml
+
   - objectTemplate: |
       apiVersion: tekton.dev/v1beta1
       kind: Task
       metadata:
-        name: config-app
-        namespace: {{ .Name }}
-      spec:
-        params:
-        - name: config-git-repo-url
-          type: string
-          description: "Git Repository URL"
-        - name: config-git-branch
-          type: string
-          description: "Git Branch to clone"
-          default: "main"
-        - name: config-git-path
-          type: string
-          description: "Config Path"
-          default: "/"
-        - name: app-name
-          description: the application name
-        steps:
-        - name: prep-build
-          image: image-registry.openshift-image-registry.svc:5000/openshift/maven-jdk-mandrel-builder:latest
-          imagePullPolicy: IfNotPresent
-          script: |
-            git clone -b $(params.config-git-branch) --single-branch $(params.config-git-repo-url) /workspace/source
-          env:
-          - name: user.home
-            value: /tekton/home
-          workingDir: "/"
-        - name: apply
-          image: image-registry.openshift-image-registry.svc:5000/openshift/origin-cli:latest
-          imagePullPolicy: IfNotPresent
-          workingDir: /workspace/source
-          script: |
-            echo -----------------------------------
-            echo "Applying artifacts in $(params.config-git-path)/apply directory"
-            for i in $(ls ./$(params.config-git-path)/apply)
-            do
-              sed -i "s|--APP_NAME--|$(params.app-name)|g" ./$(params.config-git-path)/apply/${i}
-            done
-            oc apply -f ./$(params.config-git-path)/apply
-            echo "Setting deployment image path"
-            DESTINATION_IMAGE="image-registry.openshift-image-registry.svc:5000/$(context.taskRun.namespace)/$(params.app-name):latest"
-            oc set image deployment/$(params.app-name) $(params.app-name)=${DESTINATION_IMAGE}
-            if [ -f ./$(params.config-git-path)/patch/deployment-patch.yaml ]
-            then
-              echo "Patching deployment"
-              sed -i "s|--APP_NAME--|$(params.app-name)|g" ./$(params.config-git-path)/patch/deployment-patch.yaml
-              oc patch deployment $(params.app-name) --patch "$(cat ./$(params.config-git-path)/patch/deployment-patch.yaml)"
-            fi
-            echo -----------------------------------
-  - objectTemplate: |
-      apiVersion: tekton.dev/v1beta1
-      kind: Task
-      metadata:
-        name: deploy-app
-        namespace: {{ .Name }}
-      spec:
-        params:
-        - name: app-name
-          description: the application name
-        steps:
-        - name: rollout
-          image: image-registry.openshift-image-registry.svc:5000/openshift/origin-cli:latest
-          imagePullPolicy: IfNotPresent
-          workingDir: /workspace
-          script: |
-            echo Rolling out $(params.app-name)
-            oc rollout restart deployment/$(params.app-name)
-            echo -----------------------------------
-  - objectTemplate: |
-      apiVersion: tekton.dev/v1beta1
-      kind: Task
-      metadata:
-        name: create-app
+        name: deploy-rolling-replace
         namespace: {{ .Name }}
       spec:
         params:
         - name: git-repo-url
           type: string
           description: "Git Repository URL"
-        - name: git-branch
+        - name: git-checkout-sha
+          description: the application name
+        - name: config-git-path
           type: string
-          description: "Git Branch to monitor"
-          default: "main"
+          description: "Config Git Path"
+          default: "/deploy-config"
+        volumes:
+        - name: app-deployment-template
+          configMap:
+            name: app-deployment-template
+        steps:
+        - name: prep-config
+          image: image-registry.openshift-image-registry.svc:5000/openshift/maven-jdk-mandrel-builder:latest
+          imagePullPolicy: IfNotPresent
+          script: |
+            mkdir -p /workspace/source
+            cd /workspace/source
+            git init
+            git remote add origin $(params.git-repo-url)
+            git pull origin $(params.git-checkout-sha)
+          env:
+          - name: user.home
+            value: /tekton/home
+          workingDir: "/"
+        - name: create-deployment
+          image: image-registry.openshift-image-registry.svc:5000/openshift/origin-cli:latest
+          imagePullPolicy: IfNotPresent
+          workingDir: /workspace/source
+          volumeMounts:
+          - name: app-deployment-template
+            mountPath: /workspace/templates
+          script: |
+            #!/bin/bash
+            set -x 
+
+            function deploy() {
+              echo -----------------------------------
+              echo "Creating Deployment"
+              oc process --local -f /workspace/templates/app-service.yaml -p APP_NAME=${APP_NAME} | oc apply -n $(context.taskRun.namespace) -f -
+              oc process --local -f /workspace/templates/app-deployment-template.yaml -p APP_NAME=${APP_NAME} -p DEPLOY_NAME=${DEPLOY_NAME} | oc apply -n $(context.taskRun.namespace) -f -
+              echo -----------------------------------
+              echo "Applying artifacts in $(params.config-git-path)/apply directory"
+              for i in $(ls ./$(params.config-git-path)/apply)
+              do
+                sed -i "s|--DEPLOY_NAME--|${DEPLOY_NAME}|g" ./$(params.config-git-path)/apply/${i}
+                sed -i "s|--APP_NAME--|${APP_NAME}|g" ./$(params.config-git-path)/apply/${i}
+              done
+              oc apply -f ./$(params.config-git-path)/apply
+              echo -----------------------------------
+              echo "Setting deployment image path"
+              echo -----------------------------------
+              DESTINATION_IMAGE="image-registry.openshift-image-registry.svc:5000/$(context.taskRun.namespace)/${APP_NAME}:${SHA:0:7}"
+              oc set image deployment/${DEPLOY_NAME} ${DEPLOY_NAME}=${DESTINATION_IMAGE}
+              if [ -f ./$(params.config-git-path)/patch/deployment-patch.yaml ]
+              then
+                echo -----------------------------------
+                echo "Patching deployment"
+                echo -----------------------------------
+                sed -i "s|--DEPLOY_NAME--|${DEPLOY_NAME}|g" ./$(params.config-git-path)/patch/deployment-patch.yaml
+                sed -i "s|--APP_NAME--|${APP_NAME}|g" ./$(params.config-git-path)/patch/deployment-patch.yaml
+                oc patch deployment ${DEPLOY_NAME} --patch "$(cat ./$(params.config-git-path)/patch/deployment-patch.yaml)"
+              fi
+              echo -----------------------------------
+            }
+
+            function verifyDeployment() {
+              echo -----------------------------------
+              echo "Make sure that the new deployment is running, give it 60 seconds to start"
+              DONE="FALSE"
+              let i=1
+              while [[ ${DONE} == "FALSE" ]]
+              do
+                DESIRED_REPLICAS=$(oc get deployment --selector app=${APP_NAME},version=${DEPLOY_NAME} -o jsonpath='{ .items[0].status.replicas}')
+                READY_REPLICAS=$(oc get deployment --selector app=${APP_NAME},version=${DEPLOY_NAME} -o jsonpath='{ .items[0].status.readyReplicas}')
+                if [[ ${DESIRED_REPLICAS} == "" ]]
+                then
+                  echo "Waiting for deployment to complete..."
+                elif [[ ${DESIRED_REPLICAS} == ${READY_REPLICAS} ]]
+                then
+                  DONE="TRUE"
+                  RUNNING="TRUE"
+                fi
+                if [[ ${i} == 60 ]]
+                then
+                  DONE="TRUE"
+                fi
+                sleep 1
+                let i=i+1
+              done
+              echo -----------------------------------
+            }
+
+            echo -----------------------------------
+            echo "Beginning Application Rollout"
+
+            APP_NAME=$(basename $(params.git-repo-url) | cut -d'.' -f1)
+            SHA=$(params.git-checkout-sha)
+            DEPLOY_NAME="${APP_NAME}-${SHA:0:7}"
+            RUNNING="FALSE"
+            
+            deploy
+            verifyDeployment
+            if [[ ${RUNNING} == "FALSE" ]]
+            then
+              echo "Application failed to start! Rolling Back"
+              oc process --local -f /workspace/templates/app-deployment-template.yaml -p APP_NAME=${APP_NAME} -p DEPLOY_NAME=${DEPLOY_NAME} | oc delete -n $(context.taskRun.namespace) -f -
+              exit 1
+            fi
+            echo "Remove Old Deployment artifacts"
+            oc delete deployment --selector app=${APP_NAME},deployment=previous -n $(context.taskRun.namespace) 
+            oc delete configmap --selector app=${APP_NAME},deployment=previous -n $(context.taskRun.namespace)
+            oc delete secret --selector app=${APP_NAME},deployment=previous -n $(context.taskRun.namespace) 
+            echo -----------------------------------
+            echo "Label Previous Deployment artifacts"
+            oc label deployment --overwrite=true --selector app=${APP_NAME},deployment=current -n $(context.taskRun.namespace) deployment=previous
+            oc label configmap --overwrite=true --selector app=${APP_NAME},deployment=current -n $(context.taskRun.namespace) deployment=previous
+            oc label secret --overwrite=true --selector app=${APP_NAME},deployment=current -n $(context.taskRun.namespace) deployment=previous
+            echo -----------------------------------
+            echo "Label New Deployment"
+            oc label deployment --selector app=${APP_NAME},version=${DEPLOY_NAME} -n $(context.taskRun.namespace) deployment=current
+            oc label configmap --selector app=${APP_NAME},version=${DEPLOY_NAME} -n $(context.taskRun.namespace) deployment=current
+            oc label secret --selector app=${APP_NAME},version=${DEPLOY_NAME} -n $(context.taskRun.namespace) deployment=current
+            echo -----------------------------------
+            echo "Scale Down Previous Deployment"
+            oc scale deployment --selector app=${APP_NAME},deployment=previous -n $(context.taskRun.namespace) --replicas=0
+            echo -----------------------------------
+
+  - objectTemplate: |
+      apiVersion: tekton.dev/v1beta1
+      kind: Pipeline
+      metadata:
+        name: build-and-deploy-java
+        namespace: {{ .Name }}
+      spec:
+        params:
         - name: build-type
           type: string
           description: "Selected build type: quarkus-jvm, quarkus-fast-jar, quarkus-native, spring-boot"
+        - name: deploy-type
+          type: string
+          description: "Selected deploy type: rolling-replace, blue-green, simple"
+        - name: git-repo-url
+          type: string
+          description: "Git Repository URL"
+        - name: git-checkout-sha
+          type: string
+          description: "Git SHA to checkout"
           default: "main"
-        steps:
-        - name: create-app
-          image: image-registry.openshift-image-registry.svc:5000/openshift/origin-cli:latest
-          imagePullPolicy: IfNotPresent
-          workingDir: /workspace
-          script: |
-            echo "Creating Application Resources"
-            APP_NAME=$(basename $(params.git-repo-url) | cut -d'.' -f1)
-            oc process --local -f /workspace/templates/app-resources-template.yaml -p APP_NAME=${APP_NAME} -p GIT_REPOSITORY=$(params.git-repo-url) -p GIT_BRANCH=$(params.git-branch) -p BUILD_TYPE=$(params.build-type)| oc apply -f -
-          volumeMounts:
-          - name: app-resources-template
-            mountPath: /workspace/templates
-        volumes:
-        - name: app-resources-template
-          configMap:
-            name: app-resources-template
+        - name: config-git-path
+          type: string
+          description: "Config Git Path"
+          default: "/deploy-config"
+        tasks:
+        - name: build
+          taskRef:
+            name: build-java
+          params:
+          - name: build-type
+            value: $(params.build-type)
+          - name: git-repo-url
+            value: $(params.git-repo-url)
+          - name: git-checkout-sha
+            value: $(params.git-checkout-sha)
+        - name: deploy-rolling-replace
+          taskRef:
+            name: deploy-rolling-replace
+          runAfter:
+          - build
+          when:
+          - input: "$(params.deploy-type)"
+            operator: in
+            values: ["rolling-replace"]
+          params:
+          - name: git-repo-url
+            value: $(params.git-repo-url)
+          - name: git-checkout-sha
+            value: $(params.git-checkout-sha)
+          - name: config-git-path
+            value: $(params.config-git-path)
+
   - objectTemplate: |
       apiVersion: v1
       kind: ConfigMap
       metadata:
-        name: app-resources-template
+        name: app-deployment-template
         namespace: {{ .Name }}
       data:
-        app-resources-template.yaml: |
+        app-service.yaml: |
           apiVersion: template.openshift.io/v1
           kind: Template
           metadata:
             annotations:
               template.openshift.io/bindable: "false"
-            name: create-app-resources
+            name: create-service
           objects:
-            - apiVersion: v1
-              kind: ImageStream
-              metadata:
-                labels:
-                  app: "${APP_NAME}"
-                name: "${APP_NAME}"
-              spec:
-                lookupPolicy:
-                  local: false
-
             - apiVersion: v1
               kind: Service
               metadata:
                 annotations:
                   description: ${APP_NAME} Port 8080 Service.
                 labels:
-                  app: ${APP_NAME}
+                  app: "${APP_NAME}"
                 name: ${APP_NAME}
               spec:
                 ports:
@@ -346,21 +356,34 @@ spec:
                   protocol: TCP
                   targetPort: 8080
                 selector:
-                  app: ${APP_NAME}
+                  app: "${APP_NAME}"
+          parameters:
+            -
+              name: APP_NAME
+              required: true
 
+        app-deployment-template.yaml: |
+          apiVersion: template.openshift.io/v1
+          kind: Template
+          metadata:
+            annotations:
+              template.openshift.io/bindable: "false"
+            name: create-deployment
+          objects:
             - apiVersion: apps/v1
               kind: Deployment
               metadata:
                 annotations:
-                  description: ${APP_NAME} Deployment.
+                  description: ${DEPLOY_NAME} Deployment.
                 labels:
-                  app: ${APP_NAME}
-                name: ${APP_NAME}
+                  app: "${APP_NAME}"
+                  version: "${DEPLOY_NAME}"
+                name: ${DEPLOY_NAME}
               spec:
                 replicas: 0
                 selector:
                   matchLabels:
-                    app: ${APP_NAME}
+                    version: "${DEPLOY_NAME}"
                 strategy:
                   type: RollingUpdate
                   RollingUpdate:
@@ -369,8 +392,9 @@ spec:
                 template:
                   metadata:
                     labels:
-                      app: ${APP_NAME}
-                    name: ${APP_NAME}
+                      app: "${APP_NAME}"
+                      version: "${DEPLOY_NAME}"
+                    name: ${DEPLOY_NAME}
                   spec:
                     initContainers:
                     - args:
@@ -402,14 +426,9 @@ spec:
                     - env:
                       - name: JAVA_OPTIONS
                         value: '-Dquarkus.http.host=0.0.0.0 -Djava.util.logging.manager=org.jboss.logmanager.LogManager -Djavax.net.ssl.trustStore=/var/run/secrets/java.io/keystores/truststore.jks -Djavax.net.ssl.trustStorePassword=changeit'
-                      envFrom:
-                      - configMapRef:
-                          name: ${APP_NAME} 
-                      - secretRef:
-                          name: ${APP_NAME}
-                      image: ${APP_NAME}
+                      image: ${DEPLOY_NAME}
                       imagePullPolicy: IfNotPresent
-                      name: ${APP_NAME}
+                      name: ${DEPLOY_NAME}
                       ports:
                       - containerPort: 8778
                         name: jolokia
@@ -446,111 +465,10 @@ spec:
                     - emptyDir: {}
                       name: keystore-volume
 
-            - apiVersion: triggers.tekton.dev/v1alpha1
-              kind: TriggerTemplate
-              metadata:
-                name: ${APP_NAME}
-              spec:
-                params:
-                  - name: git-checkout-sha
-                    description: The git SHA to checkout
-                    default: main
-                  - name: git-repo-url
-                    description: The git repository url
-                  - name: config-git-repo-url
-                    description: "Git repository for application configuration"
-                  - name: config-git-branch
-                    description: "Git repository branch for application configuration"
-                  - name: config-git-path
-                    description: "Git repository path for application configuration"
-                  - name: app-name
-                    description: "The application name"
-                resourcetemplates:
-                  - apiVersion: tekton.dev/v1beta1
-                    kind: PipelineRun
-                    metadata:
-                      name: ${APP_NAME}-$(uid)
-                    spec:
-                      serviceAccountName: pipeline
-                      pipelineRef: 
-                        name: build-and-deploy-java-cloud-native
-                      params:
-                      - name: app-name
-                        value: $(tt.params.app-name)
-                      - name: build-type
-                        value: ${BUILD_TYPE}
-                      - name: git-repo-url
-                        value: $(tt.params.git-repo-url)
-                      - name: git-checkout-sha
-                        value: $(tt.params.git-checkout-sha)
-                      - name: config-git-repo-url
-                        value: $(tt.params.config-git-repo-url)
-                      - name: config-git-branch
-                        value: $(tt.params.config-git-branch)
-                      - name: config-git-path
-                        value: $(tt.params.config-git-path)
-
-            - apiVersion: triggers.tekton.dev/v1alpha1
-              kind: TriggerBinding
-              metadata:
-                name: ${APP_NAME}
-              spec:
-                params:
-                  - name: git-checkout-sha
-                    value: "$(body.checkout_sha)"
-                  - name: app-name
-                    value: ${APP_NAME}
-                  - name: git-repo-url
-                    value: "$(body.repository.git_ssh_url)"
-                  - name: config-git-repo-url
-                    value: ${GIT_REPOSITORY}
-                  - name: config-git-branch
-                    value: ${GIT_BRANCH}
-                  - name: config-git-path
-                    value: "/deploy-config"
-
-            - apiVersion: triggers.tekton.dev/v1alpha1
-              kind: EventListener
-              metadata:
-                name: ${APP_NAME}-listener
-              spec:
-                serviceAccountName: pipeline
-                triggers:
-                  - bindings:
-                    - ref: ${APP_NAME}
-                    template:
-                      name: ${APP_NAME}
-
-            - apiVersion: tekton.dev/v1beta1
-              kind: TaskRun
-              metadata:
-                name: create-webhook-${RANDOM_TASK}
-              spec:
-                taskRef:
-                  name: create-webhook
-                params:
-                - name: app-name
-                  value: ${APP_NAME}
-                - name: git-repo-url
-                  value: ${GIT_REPOSITORY}
-                - name: git-branch
-                  value: ${GIT_BRANCH}
-
           parameters:
             -
               name: APP_NAME
               required: true
             -
-              name: GIT_REPOSITORY
+              name: DEPLOY_NAME
               required: true
-            -
-              name: GIT_BRANCH
-              required: true
-              value: "main"
-            - 
-              name: BUILD_TYPE
-              required: true
-            -
-              name: RANDOM_TASK
-              generate: expression
-              from: "[a-z0-9]{8}"

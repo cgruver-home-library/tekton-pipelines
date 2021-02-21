@@ -9,6 +9,10 @@ spec:
     description: "Git Repository URL"
   - name: git-checkout-sha
     description: the application name
+  - name: config-git-path
+    type: string
+    description: "Config Git Path"
+    default: "/deploy-config"
   volumes:
   - name: app-deployment-template
     configMap:
@@ -36,6 +40,7 @@ spec:
       mountPath: /workspace/templates
     script: |
       #!/bin/bash
+      set -x 
 
       function deploy() {
         echo -----------------------------------
@@ -46,7 +51,8 @@ spec:
         echo "Applying artifacts in $(params.config-git-path)/apply directory"
         for i in $(ls ./$(params.config-git-path)/apply)
         do
-          sed -i "s|--APP_NAME--|${DEPLOY_NAME}|g" ./$(params.config-git-path)/apply/${i}
+          sed -i "s|--DEPLOY_NAME--|${DEPLOY_NAME}|g" ./$(params.config-git-path)/apply/${i}
+          sed -i "s|--APP_NAME--|${APP_NAME}|g" ./$(params.config-git-path)/apply/${i}
         done
         oc apply -f ./$(params.config-git-path)/apply
         echo -----------------------------------
@@ -59,7 +65,8 @@ spec:
           echo -----------------------------------
           echo "Patching deployment"
           echo -----------------------------------
-          sed -i "s|--APP_NAME--|${DEPLOY_NAME}|g" ./$(params.config-git-path)/patch/deployment-patch.yaml
+          sed -i "s|--DEPLOY_NAME--|${DEPLOY_NAME}|g" ./$(params.config-git-path)/patch/deployment-patch.yaml
+          sed -i "s|--APP_NAME--|${APP_NAME}|g" ./$(params.config-git-path)/patch/deployment-patch.yaml
           oc patch deployment ${DEPLOY_NAME} --patch "$(cat ./$(params.config-git-path)/patch/deployment-patch.yaml)"
         fi
         echo -----------------------------------
@@ -67,19 +74,22 @@ spec:
 
       function verifyDeployment() {
         echo -----------------------------------
-        echo "Make sure that the new deployment is running, give it 30 seconds to start"
+        echo "Make sure that the new deployment is running, give it 60 seconds to start"
         DONE="FALSE"
         let i=1
         while [[ ${DONE} == "FALSE" ]]
         do
           DESIRED_REPLICAS=$(oc get deployment --selector app=${APP_NAME},version=${DEPLOY_NAME} -o jsonpath='{ .items[0].status.replicas}')
           READY_REPLICAS=$(oc get deployment --selector app=${APP_NAME},version=${DEPLOY_NAME} -o jsonpath='{ .items[0].status.readyReplicas}')
-          if [[ ${DESIRED_REPLICAS} == ${READY_REPLICAS} ]]
+          if [[ ${DESIRED_REPLICAS} == "" ]]
+          then
+            echo "Waiting for deployment to complete..."
+          elif [[ ${DESIRED_REPLICAS} == ${READY_REPLICAS} ]]
           then
             DONE="TRUE"
             RUNNING="TRUE"
           fi
-          if [[ ${i} == 30 ]]
+          if [[ ${i} == 60 ]]
           then
             DONE="TRUE"
           fi
@@ -106,14 +116,14 @@ spec:
         exit 1
       fi
       echo "Remove Old Deployment artifacts"
-      oc delete deployment --selector app=${APP_NAME},deployemnt=previous -n $(context.taskRun.namespace) 
-      oc delete configmap --selector app=${APP_NAME},deployemnt=previous -n $(context.taskRun.namespace)
-      oc delete secret --selector app=${APP_NAME},deployemnt=previous -n $(context.taskRun.namespace) 
+      oc delete deployment --selector app=${APP_NAME},deployment=previous -n $(context.taskRun.namespace) 
+      oc delete configmap --selector app=${APP_NAME},deployment=previous -n $(context.taskRun.namespace)
+      oc delete secret --selector app=${APP_NAME},deployment=previous -n $(context.taskRun.namespace) 
       echo -----------------------------------
       echo "Label Previous Deployment artifacts"
-      oc label deployment --selector app=${APP_NAME},deployemnt=current -n $(context.taskRun.namespace)  deployment=previous
-      oc label configmap --selector app=${APP_NAME},deployemnt=current -n $(context.taskRun.namespace)  deployment=previous
-      oc label secret --selector app=${APP_NAME},deployemnt=current -n $(context.taskRun.namespace)  deployment=previous
+      oc label deployment --overwrite=true --selector app=${APP_NAME},deployment=current -n $(context.taskRun.namespace) deployment=previous
+      oc label configmap --overwrite=true --selector app=${APP_NAME},deployment=current -n $(context.taskRun.namespace) deployment=previous
+      oc label secret --overwrite=true --selector app=${APP_NAME},deployment=current -n $(context.taskRun.namespace) deployment=previous
       echo -----------------------------------
       echo "Label New Deployment"
       oc label deployment --selector app=${APP_NAME},version=${DEPLOY_NAME} -n $(context.taskRun.namespace) deployment=current
@@ -121,5 +131,5 @@ spec:
       oc label secret --selector app=${APP_NAME},version=${DEPLOY_NAME} -n $(context.taskRun.namespace) deployment=current
       echo -----------------------------------
       echo "Scale Down Previous Deployment"
-      oc scale deployment ${i} --selector app=${APP_NAME},deployemnt=previous -n $(context.taskRun.namespace) --replicas=0
+      oc scale deployment --selector app=${APP_NAME},deployment=previous -n $(context.taskRun.namespace) --replicas=0
       echo -----------------------------------

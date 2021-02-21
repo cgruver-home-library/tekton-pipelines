@@ -19,7 +19,6 @@ spec:
   - name: git-checkout-sha
     type: string
     description: "Git SHA to checkout"
-    default: "main"
   - name: tlsVerify
     description: tls verify
     type: string
@@ -117,7 +116,6 @@ spec:
       DESTINATION_IMAGE="image-registry.openshift-image-registry.svc:5000/$(context.taskRun.namespace)/${APP_NAME}"
       buildah push --tls-verify=$(params.tlsVerify) ${DESTINATION_IMAGE}:${SHA:0:7} docker://${DESTINATION_IMAGE}:${SHA:0:7}
       buildah push --tls-verify=$(params.tlsVerify) ${DESTINATION_IMAGE}:${SHA:0:7} docker://${DESTINATION_IMAGE}:latest
-      buildah tag 
     workingDir: "/workspace/source"
   volumes:
   - name: varlibc

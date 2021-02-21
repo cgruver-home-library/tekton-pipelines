@@ -1,5 +1,6 @@
 target/
 Dockerfile
+wip/
 
 ### STS ###
 .apt_generated
