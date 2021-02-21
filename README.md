@@ -1,41 +1,20 @@
 # Tekton Pipelines for Java Applications
 # Work In Progress: This documentation is incomplete
 
-This lab exercise provides an opinionated set of pipelines that allow development teams to set up CI/CD for their projects without maintaining pipeline boilerplate within their development code base.
+This pipeline implements a developer experience that flows like:
 
-The capabilities provided are achieved by taking advantage of OpenShift Templates exposed through the Catalog, and the Namespace Configuration Operator which synchronizes and maintains common artifacts across labeled namespaces.
-
-When you are finished with this lab, you will have a developer experience that flows like this:
-
-1. From the Delveloper Catalog, select the appropriate Template, and provide the Git URL and Branch that you will be working from.
+1. From the Delveloper Catalog, select the `create-rolling-replace-quarkus-fast-jar-app` Template, and provide the Git URL and Branch that you will be working from.
 
 1. The template will trigger a Tekton TaskRun which will:
-
-   1. Create an `ImageStream`, `Deployment`, and `Service` for your application
 
    1. Create a Tekton `TriggerTemplate`, `TriggerBinding`, and `EventListener` which will execute a `PipelineRun` when triggered by a GitLab webhook
 
    1. Create a GitLab Webhook that responds to `push` events by hitting the EventListener Route
 
-1. A simple `git push` to the selected branch of your GitLab repository will trigger a full build, test, deploy pipeline.
+1. A simple `git push` to the selected branch of your GitLab repository will trigger a build & deploy pipeline which will replace any previous deployments with a rolling release.
 
 Developer Joy!
-
-
-
-
-
-This lab exercise will require the following components: View each link for instructions
-
-1. Sonatype Nexus for your Maven Mirror and local build dependencies.
-
-    [Install and Configure Nexus](Nexus_Config.md)
-
-1. A local GitLab instance.
-1. An OpenShift 4.6+ cluster.
 ## Installation:
-
-Create a maven group in your local maven nexus: homelab-central
 
 ### Expose a route for the OKD Internal Registry:
 
@@ -44,6 +23,22 @@ oc patch configs.imageregistry.operator.openshift.io/cluster --patch '{"spec":{"
 ```
 
 ### Create pipeline images and push to the internal OKD registry:
+
+I have provided several opinionated images for this pipeline:
+
+1. `jdk-11-app-runner.Dockerfile`
+
+    This image is a simple fat jar runner.  It is based on the UBI 8 Minimal image, OpenJDK 11, and uses the java runner script from `fabric8`.
+
+1. `maven-jdk-mandrel-builder.Dockerfile`
+
+    This image is an app builder for JDK 11 and Mandrel 20 applications.  It will build Spring Boot, Quarkus JVM and Quarkus Native applications.
+
+    The image includes Maven 3.6.3, git, OpenJDK 11, and Mandrel 20.
+
+1. `buildah-nonroot.Dockerfile`
+
+    This image modifies the `quay.io/buildah/stable:latest` image to allow for non-privileged builah.
 
 ```bash
 cd images
