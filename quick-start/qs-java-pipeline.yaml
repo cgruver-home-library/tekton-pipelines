@@ -1,0 +1,37 @@
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: qs-build-and-deploy-java
+spec:
+  params:
+  - name: build-type
+    type: string
+    description: "Selected build type: quarkus-jvm, quarkus-fast-jar, quarkus-native, spring-boot"
+  - name: git-repo-url
+    type: string
+    description: "Git Repository URL"
+  - name: git-branch
+    type: string
+    description: "Git branch to checkout."
+    default: "main"
+  tasks:
+  - name: build
+    taskRef:
+      name: qs-build-java
+    params:
+    - name: build-type
+      value: $(params.build-type)
+    - name: git-repo-url
+      value: $(params.git-repo-url)
+    - name: git-branch
+      value: $(params.git-branch)
+  - name: deploy
+    taskRef:
+      name: qs-deploy
+    runAfter:
+    - build
+    params:
+    - name: git-repo-url
+      value: $(params.git-repo-url)
+
+

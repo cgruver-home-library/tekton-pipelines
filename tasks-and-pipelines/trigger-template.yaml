@@ -40,8 +40,10 @@ data:
                   value: ${DEPLOY_TYPE}
                 - name: git-repo-url
                   value: $(tt.params.git-repo-url)
-                - name: git-checkout-sha
+                - name: git-checkout
                   value: $(tt.params.git-checkout-sha)
+                - name: clone-type
+                  value: "sha"
                 - name: config-git-path
                   value: $(tt.params.config-git-path)
 

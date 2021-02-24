@@ -1,28 +1,23 @@
 apiVersion: tekton.dev/v1beta1
 kind: Task
 metadata:
-  name: build-java
+  name: qs-build-java
 spec:
   stepTemplate:
     volumeMounts:
     - name: varlibc
       mountPath: /var/lib/containers
-    - name: maven-settings
-      mountPath: /tmp/maven-settings
   params:
   - name: build-type
     type: string
     description: "Selected build type: quarkus-jvm, quarkus-fast-jar, quarkus-native, spring-boot"
+    default: "quarkus-fast-jar"
   - name: git-repo-url
     type: string
     description: "Git Repository URL"
-  - name: git-checkout
+  - name: git-branch
     type: string
-    description: "Git code to checkout, either a branch name or a commit sha.  Determined by the value of clone-type"
-  - name: clone-type
-    type: string
-    description: "The type of git clone: sha, branch"
-    default: "branch"
+    description: "Git branch to checkout."
   - name: tlsVerify
     description: tls verify
     type: string
@@ -32,22 +27,9 @@ spec:
     image: image-registry.openshift-image-registry.svc:5000/openshift/maven-jdk-mandrel-builder:latest
     imagePullPolicy: IfNotPresent
     script: |
-      case $(params.clone-type) in
-        sha)
-          mkdir -p /workspace/source
-          cd /workspace/source
-          git init
-          git remote add origin $(params.git-repo-url)
-          git pull origin $(params.git-checkout)
-          echo "$(params.git-checkout)" > /workspace/git-sha.out
-        ;;
-        branch)
-          git clone -b $(params.git-checkout) --single-branch $(params.git-repo-url) /workspace/source
-          cd /workspace/source
-          echo "$(git rev-parse HEAD)" > /workspace/git-sha.out
-        ;;
-      esac
-      cp /tmp/maven-settings/settings.xml /workspace/source
+      git clone -b $(params.git-branch) --single-branch $(params.git-repo-url) /workspace/source
+      cd /workspace/source
+      echo "$(git rev-parse HEAD)" > /workspace/git-sha.out
     env:
     - name: user.home
       value: /tekton/home
@@ -56,7 +38,7 @@ spec:
     image: image-registry.openshift-image-registry.svc:5000/openshift/maven-jdk-mandrel-builder:latest
     imagePullPolicy: IfNotPresent
     script: |
-      MVN_ARGS="-DskipTests -Dmaven.wagon.http.ssl.insecure=true -ssettings.xml -DappName=app"
+      MVN_ARGS="-DskipTests -Dmaven.wagon.http.ssl.insecure=true -DappName=app"
       case $(params.build-type) in
         spring-boot)
         ;;
@@ -87,7 +69,7 @@ spec:
       echo "driver=\"vfs\"" >> ${HOME}/.config/containers/storage.conf
       APP_NAME=$(basename $(params.git-repo-url) | cut -d'.' -f1)
       SHA=$(cat /workspace/git-sha.out)
-      DESTINATION_IMAGE="image-registry.openshift-image-registry.svc:5000/$(context.taskRun.namespace)/${APP_NAME}:${SHA:0:7}"
+      DESTINATION_IMAGE="image-registry.openshift-image-registry.svc:5000/$(context.taskRun.namespace)/${APP_NAME}:latest"
       if [[ $(params.build-type) == "quarkus-native" ]]
       then
         CONTAINER=$(buildah --tls-verify=$(params.tlsVerify) from image-registry.openshift-image-registry.svc:5000/openshift/ubi-minimal:latest)
@@ -131,12 +113,9 @@ spec:
       SHA=$(cat /workspace/git-sha.out)
       APP_NAME=$(basename $(params.git-repo-url) | cut -d'.' -f1)
       DESTINATION_IMAGE="image-registry.openshift-image-registry.svc:5000/$(context.taskRun.namespace)/${APP_NAME}"
-      buildah push --tls-verify=$(params.tlsVerify) ${DESTINATION_IMAGE}:${SHA:0:7} docker://${DESTINATION_IMAGE}:${SHA:0:7}
-      buildah push --tls-verify=$(params.tlsVerify) ${DESTINATION_IMAGE}:${SHA:0:7} docker://${DESTINATION_IMAGE}:latest
+      buildah push --tls-verify=$(params.tlsVerify) ${DESTINATION_IMAGE}:latest docker://${DESTINATION_IMAGE}:latest
     workingDir: "/workspace/source"
   volumes:
   - name: varlibc
     emptyDir: {}
-  - name: maven-settings
-    configMap:
-      name: maven-settings-xml
+

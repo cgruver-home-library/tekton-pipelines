@@ -7,8 +7,13 @@ spec:
   - name: git-repo-url
     type: string
     description: "Git Repository URL"
-  - name: git-checkout-sha
-    description: the application name
+  - name: git-checkout
+    type: string
+    description: "Git code to checkout, either a branch name or a commit sha.  Determined by the value of clone-type"
+  - name: clone-type
+    type: string
+    description: "The type of git clone: sha, branch"
+    default: "branch"
   - name: config-git-path
     type: string
     description: "Config Git Path"
@@ -22,11 +27,21 @@ spec:
     image: image-registry.openshift-image-registry.svc:5000/openshift/maven-jdk-mandrel-builder:latest
     imagePullPolicy: IfNotPresent
     script: |
-      mkdir -p /workspace/source
-      cd /workspace/source
-      git init
-      git remote add origin $(params.git-repo-url)
-      git pull origin $(params.git-checkout-sha)
+      case $(params.clone-type) in
+        sha)
+          mkdir -p /workspace/source
+          cd /workspace/source
+          git init
+          git remote add origin $(params.git-repo-url)
+          git pull origin $(params.git-checkout)
+          echo "$(params.git-checkout)" > /workspace/git-sha.out
+        ;;
+        branch)
+          git clone -b $(params.git-checkout) --single-branch $(params.git-repo-url) /workspace/source
+          cd /workspace/source
+          echo "$(git rev-parse HEAD)" > /workspace/git-sha.out
+        ;;
+      esac
     env:
     - name: user.home
       value: /tekton/home
@@ -103,7 +118,7 @@ spec:
       echo "Beginning Application Rollout"
 
       APP_NAME=$(basename $(params.git-repo-url) | cut -d'.' -f1)
-      SHA=$(params.git-checkout-sha)
+      SHA=$(cat /workspace/git-sha.out)
       DEPLOY_NAME="${APP_NAME}-${SHA:0:7}"
       RUNNING="FALSE"
       

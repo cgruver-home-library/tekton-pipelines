@@ -1,0 +1,81 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: qs-deploy
+spec:
+  params:
+  - name: git-repo-url
+    type: string
+    description: "Git Repository URL"
+  volumes:
+  - name: qs-app-deployment-template
+    configMap:
+      name: qs-app-deployment-template
+  steps:
+  - name: create-deployment
+    image: image-registry.openshift-image-registry.svc:5000/openshift/origin-cli:latest
+    imagePullPolicy: IfNotPresent
+    workingDir: /workspace/source
+    volumeMounts:
+    - name: qs-app-deployment-template
+      mountPath: /workspace/templates
+    script: |
+      #!/bin/bash
+
+      function deploy() {
+        echo -----------------------------------
+        echo "Creating Deployment"
+        oc process --local -f /workspace/templates/app-deployment-template.yaml -p APP_NAME=${APP_NAME} | oc apply -n $(context.taskRun.namespace) -f -
+        echo -----------------------------------
+        echo "Setting deployment image"
+        echo -----------------------------------
+        DESTINATION_IMAGE="image-registry.openshift-image-registry.svc:5000/$(context.taskRun.namespace)/${APP_NAME}:latest"
+        oc set image deployment/${APP_NAME} ${APP_NAME}=${DESTINATION_IMAGE}
+        echo -----------------------------------
+        echo "Scale Deployment to 3 Replicas"
+        oc scale deployment/${APP_NAME} --replicas=3
+        echo -----------------------------------
+      }
+
+      function verifyDeployment() {
+        echo -----------------------------------
+        echo "Make sure that the new deployment is running, give it 60 seconds to start"
+        DONE="FALSE"
+        let i=1
+        while [[ ${DONE} == "FALSE" ]]
+        do
+          DESIRED_REPLICAS=$(oc get deployment --selector app=${APP_NAME} -o jsonpath='{ .items[0].status.replicas}')
+          READY_REPLICAS=$(oc get deployment --selector app=${APP_NAME} -o jsonpath='{ .items[0].status.readyReplicas}')
+          if [[ ${DESIRED_REPLICAS} == "" ]]
+          then
+            echo "Waiting for deployment to complete..."
+          elif [[ ${DESIRED_REPLICAS} == ${READY_REPLICAS} ]]
+          then
+            DONE="TRUE"
+            RUNNING="TRUE"
+          fi
+          if [[ ${i} == 60 ]]
+          then
+            DONE="TRUE"
+          fi
+          sleep 1
+          let i=i+1
+        done
+        echo -----------------------------------
+      }
+
+      echo -----------------------------------
+      echo "Beginning Application Rollout"
+
+      APP_NAME=$(basename $(params.git-repo-url) | cut -d'.' -f1)
+      RUNNING="FALSE"
+      
+      deploy
+      verifyDeployment
+      if [[ ${RUNNING} == "FALSE" ]]
+      then
+        echo "Application failed to start! Rolling Back"
+        oc process --local -f /workspace/templates/app-deployment-template.yaml -p APP_NAME=${APP_NAME} | oc delete -n $(context.taskRun.namespace) -f -
+        exit 1
+      fi
+      echo -----------------------------------
