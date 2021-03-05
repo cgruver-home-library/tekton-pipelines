@@ -48,6 +48,7 @@ data:
           labels:
             app: "${APP_NAME}"
             version: "${DEPLOY_NAME}"
+            new-deploy: ""
           name: ${DEPLOY_NAME}
         spec:
           replicas: 0

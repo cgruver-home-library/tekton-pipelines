@@ -131,20 +131,20 @@ spec:
         exit 1
       fi
       echo "Remove Old Deployment artifacts"
-      oc delete deployment --selector app=${APP_NAME},deployment=previous -n $(context.taskRun.namespace) 
-      oc delete configmap --selector app=${APP_NAME},deployment=previous -n $(context.taskRun.namespace)
-      oc delete secret --selector app=${APP_NAME},deployment=previous -n $(context.taskRun.namespace) 
+      oc delete deployment --selector app=${APP_NAME},previous="" -n $(context.taskRun.namespace) 
+      oc delete configmap --selector app=${APP_NAME},previous="" -n $(context.taskRun.namespace)
+      oc delete secret --selector app=${APP_NAME},previous="" -n $(context.taskRun.namespace) 
       echo -----------------------------------
       echo "Label Previous Deployment artifacts"
-      oc label deployment --overwrite=true --selector app=${APP_NAME},deployment=current -n $(context.taskRun.namespace) deployment=previous
-      oc label configmap --overwrite=true --selector app=${APP_NAME},deployment=current -n $(context.taskRun.namespace) deployment=previous
-      oc label secret --overwrite=true --selector app=${APP_NAME},deployment=current -n $(context.taskRun.namespace) deployment=previous
+      oc label deployment --selector app=${APP_NAME},latest="" -n $(context.taskRun.namespace) previous="" latest-
+      oc label configmap --selector app=${APP_NAME},latest="" -n $(context.taskRun.namespace) previous="" latest-
+      oc label secret --selector app=${APP_NAME},latest="" -n $(context.taskRun.namespace) previous="" latest-
       echo -----------------------------------
       echo "Label New Deployment"
-      oc label deployment --selector app=${APP_NAME},version=${DEPLOY_NAME} -n $(context.taskRun.namespace) deployment=current
-      oc label configmap --selector app=${APP_NAME},version=${DEPLOY_NAME} -n $(context.taskRun.namespace) deployment=current
-      oc label secret --selector app=${APP_NAME},version=${DEPLOY_NAME} -n $(context.taskRun.namespace) deployment=current
+      oc label deployment --selector app=${APP_NAME},version=${DEPLOY_NAME},new-deploy="" -n $(context.taskRun.namespace) latest="" new-deploy- previous-
+      oc label configmap --selector app=${APP_NAME},version=${DEPLOY_NAME} -n $(context.taskRun.namespace) latest="" previous-
+      oc label secret --selector app=${APP_NAME},version=${DEPLOY_NAME} -n $(context.taskRun.namespace) latest="" previous-
       echo -----------------------------------
       echo "Scale Down Previous Deployment"
-      oc scale deployment --selector app=${APP_NAME},deployment=previous -n $(context.taskRun.namespace) --replicas=0
+      oc scale deployment --selector app=${APP_NAME},previous="" -n $(context.taskRun.namespace) --replicas=0
       echo -----------------------------------

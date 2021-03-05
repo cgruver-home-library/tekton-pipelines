@@ -75,6 +75,11 @@ podman push ${IMAGE_REGISTRY}/openshift/buildah:nonroot --tls-verify=false
 
 ```
 
+```bash
+image-registry.openshift-image-registry.svc:5000
+```
+
+
 Install Namespace Configuration Operator:
 
 ```bash
@@ -158,3 +163,62 @@ __Warning:__ This will delete all of the container images on your system.  It wi
 ```bash
 podman system prune --all --force
 ```
+
+```yaml
+kind: BuildConfig
+apiVersion: build.openshift.io/v1
+metadata:
+  annotations:
+    app.openshift.io/vcs-ref: wip
+    app.openshift.io/vcs-uri: 'https://github.com/lab-monkeys/tekton-pipelines.git'
+  name: maven-jdk-mandrel-builder
+  namespace: eric-test
+  labels:
+    app: quarkus-builder-image
+    app.kubernetes.io/component: quarkus-builder-image
+    app.kubernetes.io/instance: quarkus-builder-image
+    app.kubernetes.io/part-of: quarkus-builder
+spec:
+  nodeSelector: null
+  output:
+    to:
+      kind: ImageStreamTag
+      name: 'quarkus-builder-image:latest'
+  resources: {}
+  successfulBuildsHistoryLimit: 5
+  failedBuildsHistoryLimit: 5
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: maven-jdk-mandrel-builder.Dockerfile
+  postCommit: {}
+  source:
+    type: Git
+    git:
+      uri: 'https://git.delta.com/ericsauer/tekton-pipelines.git'
+      ref: wip
+    contextDir: /images
+  triggers:
+    - type: ConfigChange
+  runPolicy: Serial
+  ```
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: config-defaults
+  namespace: openshift-pipelines
+  labels:
+    app.kubernetes.io/instance: default
+    app.kubernetes.io/part-of: tekton-pipelines
+data:
+  default-service-account: "pipeline"
+  default-managed-by-label-value: "openshift-pipelines"
+  default-pod-template: |
+    securityContext:
+      runAsUser: 1000640000
+      fsGroup: 1000640000
+
+  ```
+  
