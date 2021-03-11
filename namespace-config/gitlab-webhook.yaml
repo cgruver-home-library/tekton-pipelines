@@ -92,6 +92,17 @@ spec:
             HOOK_URL=http://$(cat /workspace/hook-url)
             curl -X POST -H "PRIVATE-TOKEN: $(cat /var/secret/access-token)" -d "push_events=true" -d "push_events_branch_filter=$(params.git-branch)" -d "token=$(cat /var/secret/hook-token)" -d "url=${HOOK_URL}" -d "enable_ssl_verification=false" ${API_URL}
             echo -----------------------------------
+        - name: create-initial-pipeline-run
+          image: image-registry.openshift-image-registry.svc:5000/openshift/origin-cli:latest
+          imagePullPolicy: IfNotPresent
+          workingDir: /workspace
+          script: |
+            echo "Creating Application Resources"
+            APP_NAME=$(basename $(params.git-repo-url) | cut -d'.' -f1)
+            oc process --local -f /workspace/templates/initial-pipeline-run.yaml -p APP_NAME=${APP_NAME} -p GIT_REPOSITORY=$(params.git-repo-url) -p GIT_BRANCH=$(params.git-branch) -p BUILD_TYPE=$(params.build-type) -p DEPLOY_TYPE=$(params.deploy-type) | oc apply -f -
+          volumeMounts:
+          - name: trigger-template
+            mountPath: /workspace/templates
 
   - objectTemplate: |
       apiVersion: v1
@@ -100,6 +111,59 @@ spec:
         name: trigger-template
         namespace: {{ .Name }}
       data:
+        initial-pipeline-run.yaml: |
+          apiVersion: template.openshift.io/v1
+          kind: Template
+          metadata:
+            annotations:
+              template.openshift.io/bindable: "false"
+            name: pipeline-run
+          objects:
+            - apiVersion: tekton.dev/v1beta1
+              kind: PipelineRun
+              metadata:
+                name: ${APP_NAME}-initial-pipeline-run
+              spec:
+                serviceAccountName: pipeline
+                pipelineRef: 
+                  name: build-and-deploy-java
+                params:
+                - name: build-type
+                  value: ${BUILD_TYPE}
+                - name: deploy-type
+                  value: ${DEPLOY_TYPE}
+                - name: git-repo-url
+                  value: ${GIT_REPOSITORY}
+                - name: git-checkout
+                  value: ${GIT_BRANCH}
+                - name: clone-type
+                  value: branch
+                - name: config-git-path
+                  value: deploy-config
+
+          parameters:
+            -
+              name: APP_NAME
+              required: true
+            -
+              name: GIT_REPOSITORY
+              required: true
+            -
+              name: GIT_BRANCH
+              required: true
+              value: "main"
+            - 
+              name: BUILD_TYPE
+              required: true
+            -
+              name: DEPLOY_TYPE
+              required: true
+              value: "rolling-replace"
+            - 
+              name: CONFIG_PATH
+              required: true
+              value: "/deploy-config"
+
         gitlab-trigger-template.yaml: |
           apiVersion: template.openshift.io/v1
           kind: Template
@@ -137,8 +201,10 @@ spec:
                         value: ${DEPLOY_TYPE}
                       - name: git-repo-url
                         value: $(tt.params.git-repo-url)
-                      - name: git-checkout-sha
+                      - name: git-checkout
                         value: $(tt.params.git-checkout-sha)
+                      - name: clone-type
+                        value: "sha"
                       - name: config-git-path
                         value: $(tt.params.config-git-path)
 
@@ -189,3 +255,4 @@ spec:
               name: CONFIG_PATH
               required: true
               value: "/deploy-config"
+
