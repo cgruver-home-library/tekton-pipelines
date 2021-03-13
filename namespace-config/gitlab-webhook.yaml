@@ -46,6 +46,7 @@ spec:
             echo "Creating Application Resources"
             APP_NAME=$(basename $(params.git-repo-url) | cut -d'.' -f1)
             oc process --local -f /workspace/templates/gitlab-trigger-template.yaml -p APP_NAME=${APP_NAME} -p GIT_REPOSITORY=$(params.git-repo-url) -p GIT_BRANCH=$(params.git-branch) -p BUILD_TYPE=$(params.build-type) -p DEPLOY_TYPE=$(params.deploy-type) | oc apply -f -
+            sleep 5
           volumeMounts:
           - name: trigger-template
             mountPath: /workspace/templates
