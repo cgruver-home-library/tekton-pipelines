@@ -20,8 +20,14 @@ Developer Joy!
 mkdir tekton-install
 cd tekton-install
 
-curl -o tekton-release.yaml https://storage.googleapis.com/tekton-releases/operator/previous/v0.22.0-3/release.yaml
-curl -o tekton-cr.yaml https://raw.githubusercontent.com/tektoncd/operator/main/config/crs/kubernetes/config/all/operator_v1alpha1_config_cr.yaml 
+git clone https://github.com/tektoncd/operator.git
+cd operator
+git checkout release-v0.22
+make TARGET=openshift clean
+export KO_DOCKER_REPO=${LOCAL_REGISTRY}/tekton
+podman login ${LOCAL_REGISTRY}
+ko login ${LOCAL_REGISTRY}
+make TARGET=openshift apply
 
 cat << EOF > config.yaml
 apiVersion: v1
@@ -42,20 +48,6 @@ data:
       runAsUser: 1000640000
       fsGroup: 1000640000
 EOF
-
-# sed -i "s|namespace: tekton-operator|namespace: openshift-pipelines|g" tekton-release.yaml
-# sed -i "s|namespace: tekton-operator|namespace: openshift-pipelines|g" tekton-cr.yaml 
-
-oc apply -f tekton-release.yaml 
-oc apply -f tekton-cr.yaml
-oc apply -f config.yaml
-
-oc adm policy add-scc-to-user nonroot -z tekton-operators-proxy-webhook -n tekton-pipelines
-oc adm policy add-scc-to-user nonroot -z tekton-pipelines-controller -n tekton-pipelines
-oc adm policy add-scc-to-user nonroot -z tekton-pipelines-webhook -n tekton-pipelines
-oc adm policy add-scc-to-user nonroot -z tekton-triggers-webhook -n tekton-pipelines
-oc adm policy add-scc-to-user nonroot -z tekton-triggers-core-interceptors -n tekton-pipelines
-oc adm policy add-scc-to-user nonroot -z tekton-triggers-controller -n tekton-pipelines
 
 ```
 
