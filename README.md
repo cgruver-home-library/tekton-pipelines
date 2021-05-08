@@ -16,6 +16,49 @@ This pipeline implements a developer experience that flows like:
 Developer Joy!
 ## Installation:
 
+```bash
+mkdir tekton-install
+cd tekton-install
+
+curl -o tekton-release.yaml https://storage.googleapis.com/tekton-releases/operator/previous/v0.22.0-3/release.yaml
+curl -o tekton-cr.yaml https://raw.githubusercontent.com/tektoncd/operator/main/config/crs/kubernetes/config/all/operator_v1alpha1_config_cr.yaml 
+
+cat << EOF > config.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: config-defaults
+  namespace: tekton-pipelines
+  labels:
+    app.kubernetes.io/instance: default
+    app.kubernetes.io/part-of: tekton-pipelines
+data:
+  default-service-account: "pipeline"
+  default-managed-by-label-value: "tekton-operator"
+  default-pod-template: |
+    securityContext:
+      seLinuxOptions:
+        level: 's0:c25,c0'
+      runAsUser: 1000640000
+      fsGroup: 1000640000
+EOF
+
+# sed -i "s|namespace: tekton-operator|namespace: openshift-pipelines|g" tekton-release.yaml
+# sed -i "s|namespace: tekton-operator|namespace: openshift-pipelines|g" tekton-cr.yaml 
+
+oc apply -f tekton-release.yaml 
+oc apply -f tekton-cr.yaml
+oc apply -f config.yaml
+
+oc adm policy add-scc-to-user nonroot -z tekton-operators-proxy-webhook -n tekton-pipelines
+oc adm policy add-scc-to-user nonroot -z tekton-pipelines-controller -n tekton-pipelines
+oc adm policy add-scc-to-user nonroot -z tekton-pipelines-webhook -n tekton-pipelines
+oc adm policy add-scc-to-user nonroot -z tekton-triggers-webhook -n tekton-pipelines
+oc adm policy add-scc-to-user nonroot -z tekton-triggers-core-interceptors -n tekton-pipelines
+oc adm policy add-scc-to-user nonroot -z tekton-triggers-controller -n tekton-pipelines
+
+```
+
 ### Expose a route for the OKD Internal Registry:
 
 ```bash
@@ -46,9 +89,9 @@ cd images
 IMAGE_REGISTRY=$(oc get route default-route -n openshift-image-registry --template='{{ .spec.host }}')
 podman login -u $(oc whoami) -p $(oc whoami -t) --tls-verify=false ${IMAGE_REGISTRY}
 
-podman pull quay.io/openshift/origin-cli:4.6.0
-podman tag quay.io/openshift/origin-cli:4.6.0 ${IMAGE_REGISTRY}/openshift/origin-cli:4.6.0
-podman tag quay.io/openshift/origin-cli:4.6.0 ${IMAGE_REGISTRY}/openshift/origin-cli:latest
+podman pull quay.io/openshift/origin-cli:4.7.0
+podman tag quay.io/openshift/origin-cli:4.7.0 ${IMAGE_REGISTRY}/openshift/origin-cli:4.7.0
+podman tag quay.io/openshift/origin-cli:4.7.0 ${IMAGE_REGISTRY}/openshift/origin-cli:latest
 
 podman pull registry.access.redhat.com/ubi8/ubi-minimal:8.3
 podman tag registry.access.redhat.com/ubi8/ubi-minimal:8.3 ${IMAGE_REGISTRY}/openshift/ubi-minimal:8.3
@@ -63,7 +106,7 @@ podman tag ${IMAGE_REGISTRY}/openshift/maven-jdk-mandrel-builder:3.6.3-11-20.3 $
 
 podman build -t ${IMAGE_REGISTRY}/openshift/buildah:nonroot -f buildah-nonroot.Dockerfile .
 
-podman push ${IMAGE_REGISTRY}/openshift/origin-cli:4.6.0 --tls-verify=false
+podman push ${IMAGE_REGISTRY}/openshift/origin-cli:4.7.0 --tls-verify=false
 podman push ${IMAGE_REGISTRY}/openshift/origin-cli:latest --tls-verify=false
 podman push ${IMAGE_REGISTRY}/openshift/ubi-minimal:8.3 --tls-verify=false
 podman push ${IMAGE_REGISTRY}/openshift/ubi-minimal:latest --tls-verify=false

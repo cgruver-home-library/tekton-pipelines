@@ -232,7 +232,7 @@ spec:
                   - bindings:
                     - ref: ${APP_NAME}
                     template:
-                      name: ${APP_NAME}
+                      ref: ${APP_NAME}
 
           parameters:
             -
