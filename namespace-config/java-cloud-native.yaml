@@ -87,9 +87,9 @@ spec:
           workingDir: "/workspace/source"
         - name: build-image
           image: image-registry.openshift-image-registry.svc:5000/openshift/buildah:nonroot
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           script: |
-            echo "tekton:x:$(id -u):0:tekton user:${HOME}:/sbin/nologin" >> /etc/passwd
+            echo "tekton:x:$(id -u):$(id -g):tekton user:${HOME}:/sbin/nologin" >> /etc/passwd
             echo $(id -u):1100000000:65536 >> /etc/subuid
             echo $(id -u):1100000000:65536 >> /etc/subgid
             export BUILDAH_ISOLATION=chroot
@@ -133,11 +133,9 @@ spec:
           workingDir: "/workspace/source"
         - name: push-image
           image: image-registry.openshift-image-registry.svc:5000/openshift/buildah:nonroot
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           script: |
-            echo "tekton:x:$(id -u):0:tekton user:${HOME}:/sbin/nologin" >> /etc/passwd
-            echo $(id -u):1100000000:65536 >> /etc/subuid
-            echo $(id -u):1100000000:65536 >> /etc/subgid
+            echo "tekton:x:$(id -u):$(id -g):tekton user:${HOME}:/sbin/nologin" >> /etc/passwd
             export BUILDAH_ISOLATION=chroot
             SHA=$(cat /workspace/git-sha.out)
             APP_NAME=$(basename $(params.git-repo-url) | cut -d'.' -f1)
