@@ -1,0 +1,53 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: buildah-test
+spec:
+  stepTemplate:
+    volumeMounts:
+    - name: varlibc
+      mountPath: /var/lib/containers
+  steps:
+  - name: prep-workingdir
+    image: quay.io/buildah/stable:latest
+    imagePullPolicy: IfNotPresent
+    script: |
+      chmod 777 /workspace/source
+      cp -r /tekton/creds/.docker /workspace/source
+      chown -R 1000:1000 /workspace/source/.docker
+    env:
+    - name: user.home
+      value: /workspace/source
+    workingDir: "/workspace/source"
+  - name: build-image
+    image: quay.io/buildah/stable:latest
+    securityContext:
+      runAsUser: 1000
+    imagePullPolicy: IfNotPresent
+    script: |
+      export HOME=/workspace/source
+      export BUILDAH_ISOLATION=chroot
+      APP_NAME=test
+      DESTINATION_IMAGE="image-registry.openshift-image-registry.svc:5000/$(context.taskRun.namespace)/${APP_NAME}:latest"
+      buildah --version
+      BUILDAH_ARGS="--storage-driver vfs"
+      CONTAINER=$(buildah ${BUILDAH_ARGS} from quay.io/buildah/stable:latest )
+      # CONTAINER=$(buildah --storage-driver vfs --log-level trace --userns-uid-map $(id -u):$(( $(id -u) + 1 )):65536 --userns-gid-map $(id -u):$(( $(id -u) + 1 )):65536 --tls-verify=false from quay.io/buildah/stable:latest )
+      cat << EOF > ./test.sh
+      #!/bin/bash
+      echo "hello"
+      EOF
+      chmod 750 ./test.sh
+      buildah ${BUILDAH_ARGS} copy ${CONTAINER} ./test.sh /application.sh
+      buildah ${BUILDAH_ARGS} config --entrypoint '["/application.sh"]' --port 8080 ${CONTAINER}
+      buildah ${BUILDAH_ARGS} config --label GIT_COMMIT="Hello" --author="Tekton" ${CONTAINER}
+      buildah ${BUILDAH_ARGS} commit ${CONTAINER} ${DESTINATION_IMAGE}
+      buildah ${BUILDAH_ARGS} unmount ${CONTAINER}
+      buildah ${BUILDAH_ARGS} push ${DESTINATION_IMAGE} docker://${DESTINATION_IMAGE}
+    env:
+    - name: user.home
+      value: /workspace/source
+    workingDir: "/workspace/source"
+  volumes:
+  - name: varlibc
+    emptyDir: {}

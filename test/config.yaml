@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: config-defaults
+  namespace: openshift-pipelines
+  labels:
+    app.kubernetes.io/instance: default
+    app.kubernetes.io/part-of: tekton-pipelines
+data:
+  default-service-account: "pipeline"
+  default-managed-by-label-value: "openshift-pipelines"
+  default-pod-template: |
+    securityContext:
+      runAsUser: 1000640000
+      fsGroup: 1000640000

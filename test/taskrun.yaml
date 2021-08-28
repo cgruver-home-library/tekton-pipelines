@@ -1,0 +1,8 @@
+apiVersion: tekton.dev/v1beta1
+kind: TaskRun
+metadata:
+  name: buildah-test
+spec:
+  taskRef:
+    name: buildah-test
+  params: []
